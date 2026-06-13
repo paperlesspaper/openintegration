@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Daily XKCD</title>
+    <link rel="stylesheet" href="./paperless.css" />
+  </head>
+  <body>
+    <div id="website-has-loading-element"></div>
+
+    <main id="app" class="pp-screen">
+      <p>Loading XKCD...</p>
+    </main>
+
+    <script src="./paperless.iife.js"></script>
+    <script>
+      const {
+        waitForPayload,
+        getSettings,
+        getQuerySettings,
+        mergeSettings,
+        markReady,
+        markError,
+        fitAllText,
+        fitToScreen,
+        escapeHtml
+      } = window.PaperlessOpenIntegration;
+
+      const app = document.querySelector("#app");
+
+      async function render() {
+        try {
+          const payload = await waitForPayload({ timeoutMs: 20 });
+          const settings = mergeSettings(
+            { kind: "latest", difference: 0 },
+            getSettings(payload),
+            getQuerySettings()
+          );
+
+          const url = new URL("./api/xkcd", window.location.href);
+          url.searchParams.set("kind", settings.kind);
+          url.searchParams.set("difference", settings.difference);
+
+          const response = await fetch(url);
+          const comic = await response.json();
+
+          app.innerHTML = `
+            <section class="pp-header">
+              <div>
+                <h1 class="pp-title pp-fit">${escapeHtml(comic.title)}</h1>
+                <p class="pp-subtitle">xkcd #${escapeHtml(comic.num)}</p>
+              </div>
+            </section>
+
+            <section class="pp-image-frame" style="flex: 1">
+              <img src="${escapeHtml(comic.img)}" alt="${escapeHtml(comic.alt)}" />
+            </section>
+
+            <footer class="pp-footer">${escapeHtml(comic.alt)}</footer>
+          `;
+
+          fitAllText();
+          fitToScreen(app);
+          markReady();
+        } catch (error) {
+          markError(error);
+        }
+      }
+
+      window.__paperlessRenderDone = render();
+    </script>
+  </body>
+</html>

@@ -1,4 +1,4 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { chmod, cp, mkdir, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -22,6 +22,22 @@ await build({
   sourcemap: false,
   target: "es2022"
 });
+
+await build({
+  entryPoints: [resolve(root, "src/cli.ts")],
+  bundle: true,
+  external: ["@napi-rs/canvas", "epdoptimize", "puppeteer-core"],
+  format: "esm",
+  outfile: resolve(dist, "cli.js"),
+  platform: "node",
+  banner: {
+    js: "#!/usr/bin/env node"
+  },
+  sourcemap: false,
+  target: "node18"
+});
+
+await chmod(resolve(dist, "cli.js"), 0o755);
 
 await cp(resolve(dist, "browser.js"), resolve(dist, "paperless.js"));
 

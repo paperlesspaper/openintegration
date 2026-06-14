@@ -17,6 +17,7 @@ export interface ValidationResult {
 }
 
 export interface WaitForPayloadOptions {
+  timeout?: number;
   timeoutMs?: number;
   fallback?: JsonRecord;
   allowedOrigins?: string[];
@@ -26,8 +27,25 @@ export interface FitTextOptions {
   min?: number;
   max?: number;
   step?: number;
+  tolerance?: number;
+  lineBreak?: boolean | "balance";
   nowrap?: boolean;
+  fitParent?: boolean | HTMLElement;
 }
+
+export interface HyphenateTextOptions {
+  minWordLength?: number;
+  minSegmentLength?: number;
+  segmentLength?: number;
+  wordPattern?: RegExp;
+}
+
+export interface PrepareHyphenationOptions extends HyphenateTextOptions {
+  lang?: string;
+  lineBreak?: boolean | "balance";
+}
+
+export interface FitHyphenatedTextOptions extends FitTextOptions, PrepareHyphenationOptions {}
 
 export interface FitToScreenOptions {
   padding?: number;

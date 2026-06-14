@@ -27,7 +27,8 @@ function originAllowed(origin: string, allowedOrigins?: string[]): boolean {
 }
 
 export function waitForPayload(options: WaitForPayloadOptions = {}): Promise<JsonRecord> {
-  const { timeoutMs = 500, fallback = {}, allowedOrigins } = options;
+  const { fallback = {}, allowedOrigins } = options;
+  const timeoutMs = options.timeoutMs ?? options.timeout ?? 500;
 
   if (typeof window === "undefined") {
     return Promise.resolve(fallback);

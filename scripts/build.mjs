@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, rm } from "node:fs/promises";
+import { chmod, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -53,6 +53,17 @@ await build({
 });
 
 await cp(resolve(root, "src/styles/paperless.css"), resolve(dist, "paperless.css"));
+
+const previewHtmlSource = await readFile(resolve(root, "src/previewHtml.ts"), "utf8");
+const previewCssMatch = previewHtmlSource.match(/<style>\n([\s\S]*?)\n    <\/style>/);
+if (!previewCssMatch) {
+  throw new Error("Could not extract preview CSS from src/previewHtml.ts");
+}
+
+await writeFile(
+  resolve(dist, "preview.css"),
+  `${previewCssMatch[1].replace(/^      /gm, "").trim()}\n`
+);
 
 const configPath = resolve(root, "tsconfig.json");
 const configFile = ts.readConfigFile(configPath, ts.sys.readFile);

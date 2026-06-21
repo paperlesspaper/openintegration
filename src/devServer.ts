@@ -1,6 +1,6 @@
 import { watch, type FSWatcher } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { validateConfig } from "./manifest";
@@ -25,6 +25,9 @@ export interface DevServerHandle {
   liveReload: boolean;
   close(): Promise<void>;
 }
+
+const defaultColor = "light";
+const fallbackLanguage = "de";
 
 const mimeTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -76,6 +79,12 @@ function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function defaultLanguage(config: OpenIntegrationConfig): string {
+  return Array.isArray(config.language) && typeof config.language[0] === "string" && config.language[0].trim()
+    ? config.language[0]
+    : fallbackLanguage;
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
 
@@ -111,18 +120,22 @@ export function buildPayload(
     ...(config.nativeSettings ?? {}),
     ...(options.settings ?? {})
   };
+  const color =
+    typeof options.color === "string" && options.color
+      ? options.color
+      : typeof pluginSettings.color === "string" && pluginSettings.color
+        ? pluginSettings.color
+        : defaultColor;
 
-  if (typeof options.color === "string" && options.color) {
-    pluginSettings.color = options.color;
-  }
+  pluginSettings.color = color;
 
   return {
     id: "paperlesspaper-dev-preview",
     draft: true,
     meta: {
-      color: options.color,
+      color,
       frameKind: options.frameKind ?? "epd7",
-      language: options.language ?? "de",
+      language: options.language ?? defaultLanguage(config),
       orientation: options.orientation ?? "landscape",
       pluginConfigUrl: configUrl,
       pluginManifest: config,
@@ -168,6 +181,39 @@ function queryToRecord(params: URLSearchParams): JsonRecord {
   }
 
   return query;
+}
+
+function parseViewportSize(value: string): { width: number; height: number } | undefined {
+  const match = /^(\d+)x(\d+)$/i.exec(value.trim());
+
+  if (!match) {
+    return undefined;
+  }
+
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
+    return undefined;
+  }
+
+  return { height, width };
+}
+
+function variantSettings(variant: JsonRecord): JsonRecord {
+  const settings: JsonRecord = {};
+
+  for (const [key, value] of Object.entries(variant)) {
+    if (key !== "screenshots") {
+      settings[key] = value;
+    }
+  }
+
+  return settings;
+}
+
+function resolveIntegrationPath(root: string, fileName: string): string {
+  return resolve(root, fileName.replace(/^\.?\//, ""));
 }
 
 async function tryServeApi(
@@ -283,6 +329,21 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
     }
   }
 
+  const cleanupResources = () => {
+    if (changeTimer) {
+      clearTimeout(changeTimer);
+    }
+
+    fileWatcher?.close();
+    fileWatcher = undefined;
+
+    for (const client of eventClients) {
+      client.end();
+    }
+
+    eventClients.clear();
+  };
+
   const server = createServer(async (request, response) => {
     try {
       const hostHeader = request.headers.host ?? `${host}:${requestedPort}`;
@@ -290,6 +351,101 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
 
       if (requestUrl.pathname === "/__paperless/health") {
         sendJson(response, 200, { ok: true });
+        return;
+      }
+
+      if (requestUrl.pathname === "/__paperless/config-variants/regenerate" && request.method === "POST") {
+        const variants = Array.isArray(config.configVariants) ? config.configVariants : [];
+        const configUrl = new URL("/config.json", `http://${hostHeader}`).href;
+        const renderUrl = new URL(toPreviewPagePath(config.renderPage), `http://${hostHeader}`);
+        const results: JsonRecord[] = [];
+
+        for (let variantIndex = 0; variantIndex < variants.length; variantIndex += 1) {
+          const variant = variants[variantIndex];
+
+          if (!isRecord(variant) || !isRecord(variant.screenshots)) {
+            continue;
+          }
+
+          for (const [viewportName, screenshotPath] of Object.entries(variant.screenshots)) {
+            const viewport = parseViewportSize(viewportName);
+
+            if (!viewport) {
+              results.push({
+                ok: false,
+                path: screenshotPath,
+                reason: `Invalid viewport size: ${viewportName}`,
+                variantIndex,
+                viewport: viewportName
+              });
+              continue;
+            }
+
+            if (typeof screenshotPath !== "string" || screenshotPath.trim() === "") {
+              results.push({
+                ok: false,
+                reason: `Invalid screenshot path for ${viewportName}`,
+                variantIndex,
+                viewport: viewportName
+              });
+              continue;
+            }
+
+            const outputPath = resolveIntegrationPath(integrationRoot, screenshotPath);
+
+            if (!isInside(integrationRoot, outputPath)) {
+              results.push({
+                ok: false,
+                path: screenshotPath,
+                reason: "Screenshot path must stay inside the integration folder",
+                variantIndex,
+                viewport: viewportName
+              });
+              continue;
+            }
+
+            try {
+              const payload = buildPayload(config, configUrl, {
+                ...options,
+                color: typeof variant.color === "string" ? variant.color : options.color,
+                settings: variantSettings(variant)
+              });
+              const result = await renderUrlWithPuppeteer({
+                height: viewport.height,
+                optimize: true,
+                payload,
+                url: renderUrl.href,
+                width: viewport.width
+              });
+
+              await mkdir(dirname(outputPath), { recursive: true });
+              await writeFile(outputPath, result.buffer);
+              results.push({
+                height: result.height,
+                ok: true,
+                optimized: result.optimized,
+                path: screenshotPath,
+                ready: result.ready,
+                variantIndex,
+                viewport: viewportName,
+                width: result.width
+              });
+            } catch (error) {
+              results.push({
+                ok: false,
+                path: screenshotPath,
+                reason: error instanceof Error ? error.message : String(error),
+                variantIndex,
+                viewport: viewportName
+              });
+            }
+          }
+        }
+
+        sendJson(response, results.some((result) => result.ok === false) ? 500 : 200, {
+          generated: results.filter((result) => result.ok === true).length,
+          results
+        });
         return;
       }
 
@@ -392,13 +548,18 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
     }
   });
 
-  await new Promise<void>((resolveListen, rejectListen) => {
-    server.once("error", rejectListen);
-    server.listen(requestedPort, host, () => {
-      server.off("error", rejectListen);
-      resolveListen();
+  try {
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server.once("error", rejectListen);
+      server.listen(requestedPort, host, () => {
+        server.off("error", rejectListen);
+        resolveListen();
+      });
     });
-  });
+  } catch (error) {
+    cleanupResources();
+    throw error;
+  }
 
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : requestedPort;
@@ -409,15 +570,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
     url,
     close() {
       return new Promise((resolveClose, rejectClose) => {
-        if (changeTimer) {
-          clearTimeout(changeTimer);
-        }
-
-        fileWatcher?.close();
-
-        for (const client of eventClients) {
-          client.end();
-        }
+        cleanupResources();
 
         server.close((error) => {
           if (error) {

@@ -66,4 +66,83 @@ describe("preview html", () => {
     expect(html).toContain('property.inStettingsPage === true');
     expect(html).toContain('property.inStettingsPage === "true"');
   });
+
+  it("shows manifest icon and config variant screenshot controls", () => {
+    const html = createPreviewHtml({
+      config: {
+        configVariants: [
+          {
+            color: "light",
+            layout: "compact",
+            screenshots: {
+              "800x480": "./screenshots/paperboy-800x480.png"
+            }
+          }
+        ],
+        icon: "./assets/icon.svg",
+        name: "Paperboy",
+        renderPage: "./render.html",
+        version: "0.1.0"
+      },
+      configUrl: "http://127.0.0.1:4300/config.json",
+      payload: {
+        meta: {
+          pluginSettings: {}
+        }
+      },
+      renderPath: "/render.html"
+    });
+
+    expect(html).toContain('class="integration-icon" src="/assets/icon.svg"');
+    expect(html).toContain('<link rel="icon" href="/assets/icon.svg" />');
+    expect(html).toContain("<span>Config Variants</span>");
+    expect(html).toContain('id="regenerate-variants"');
+    expect(html).toContain("/__paperless/config-variants/regenerate");
+    expect(html).toContain("renderConfigVariants();");
+  });
+
+  it("uses a default favicon when the manifest has no icon", () => {
+    const html = createPreviewHtml({
+      config: {
+        name: "Paperboy",
+        renderPage: "./render.html",
+        version: "0.1.0"
+      },
+      configUrl: "http://127.0.0.1:4300/config.json",
+      payload: {
+        meta: {
+          pluginSettings: {}
+        }
+      },
+      renderPath: "/render.html"
+    });
+
+    expect(html).toContain('<link rel="icon" href="data:image/svg+xml,');
+    expect(html).not.toContain('class="integration-icon"');
+  });
+
+  it("shows a language selector when languages are declared", () => {
+    const html = createPreviewHtml({
+      config: {
+        language: ["de", "en"],
+        name: "Paperboy",
+        renderPage: "./render.html",
+        version: "0.1.0"
+      },
+      configUrl: "http://127.0.0.1:4300/config.json",
+      payload: {
+        meta: {
+          language: "de",
+          pluginSettings: {}
+        }
+      },
+      renderPath: "/render.html"
+    });
+
+    expect(html).toContain('<select id="language">');
+    expect(html).toContain('<option value="de">de</option>');
+    expect(html).toContain('<option value="en">en</option>');
+    expect(html).toContain("language?.addEventListener");
+    expect(html).toContain("language: language?.value || basePayload.meta.language");
+  });
 });

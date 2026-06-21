@@ -1,6 +1,12 @@
 export { markError, markLoading, markReady } from "./ready";
 export { waitForPayload } from "./runtime";
 export { getQuerySettings, getSettings, mergeSettings } from "./settings";
+export { getPayloadLanguage, loadLanguageJson, resolveLanguage } from "./language";
+export type {
+  LanguageJsonResult,
+  LoadLanguageJsonOptions,
+  ResolveLanguageOptions
+} from "./language";
 export {
   COLOR_THEMES,
   applyColorTheme,

@@ -94,6 +94,34 @@ async function checkApiModules(messages: CheckMessage[], root: string): Promise<
   }
 }
 
+async function checkLanguageFiles(messages: CheckMessage[], root: string, config: OpenIntegrationConfig): Promise<void> {
+  if (!Array.isArray(config.language) || config.language.length === 0) {
+    return;
+  }
+
+  for (const language of config.language) {
+    const relativePath = `languages/${language}.json`;
+    const filePath = resolve(root, relativePath);
+
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const parsed = JSON.parse(raw) as unknown;
+
+      if (!isRecord(parsed)) {
+        messages.push({ level: "error", message: `${relativePath} must contain a JSON object` });
+        continue;
+      }
+
+      messages.push({ level: "info", message: `${relativePath} found` });
+    } catch (error) {
+      messages.push({
+        level: "error",
+        message: `${relativePath} is missing or invalid: ${error instanceof Error ? error.message : String(error)}`
+      });
+    }
+  }
+}
+
 function checkSchema(messages: CheckMessage[], config: OpenIntegrationConfig): void {
   if (!("formSchema" in config)) {
     messages.push({ level: "warning", message: "formSchema is missing" });
@@ -166,6 +194,7 @@ export async function checkIntegration(configPathInput: string): Promise<CheckRe
   if (config) {
     await checkPage(messages, root, "renderPage", config.renderPage);
     await checkPage(messages, root, "settingsPage", config.settingsPage);
+    await checkLanguageFiles(messages, root, config);
     checkSchema(messages, config);
     await checkApiModules(messages, root);
   }

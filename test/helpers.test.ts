@@ -9,13 +9,16 @@ import {
   fitImage,
   fitText,
   fitToScreen,
+  getPayloadLanguage,
   getQuerySettings,
   getSettings,
   hyphenateText,
+  loadLanguageJson,
   markError,
   markLoading,
   markReady,
   mergeSettings,
+  resolveLanguage,
   stripSoftHyphens,
   validateConfig,
   waitForPayload
@@ -132,6 +135,73 @@ describe("payload and settings", () => {
       kind: "random",
       difference: 1
     });
+  });
+
+  it("getPayloadLanguage reads payload.meta.language", () => {
+    expect(
+      getPayloadLanguage({
+        meta: {
+          language: "de"
+        }
+      })
+    ).toBe("de");
+  });
+
+  it("resolveLanguage supports exact, base-code, and default fallback matches", () => {
+    expect(resolveLanguage({ requested: "en", supported: ["de", "en"], defaultLanguage: "de" })).toBe("en");
+    expect(resolveLanguage({ requested: "de-DE", supported: ["de", "en"], defaultLanguage: "en" })).toBe("de");
+    expect(resolveLanguage({ requested: "it", supported: ["de", "en"], defaultLanguage: "en" })).toBe("en");
+  });
+
+  it("loadLanguageJson resolves from the payload manifest and fetches the matching file", async () => {
+    const fetchLanguage = vi.fn(async () => ({
+      json: async () => ({ greeting: "Hallo" }),
+      ok: true,
+      status: 200
+    }) as Response);
+
+    await expect(
+      loadLanguageJson(
+        {
+          meta: {
+            language: "de-DE",
+            pluginManifest: {
+              language: ["de", "en"]
+            }
+          }
+        },
+        { fetch: fetchLanguage }
+      )
+    ).resolves.toEqual({
+      language: "de",
+      messages: {
+        greeting: "Hallo"
+      }
+    });
+    expect(fetchLanguage).toHaveBeenCalledWith("./languages/de.json");
+  });
+
+  it("loadLanguageJson falls back to the default language and fails on missing JSON", async () => {
+    const fetchLanguage = vi.fn(async () => ({
+      json: async () => ({}),
+      ok: false,
+      status: 404
+    }) as Response);
+
+    await expect(
+      loadLanguageJson(
+        {
+          meta: {
+            language: "fr",
+            pluginManifest: {
+              language: ["de", "en"]
+            }
+          }
+        },
+        { defaultLanguage: "en", fetch: fetchLanguage }
+      )
+    ).rejects.toThrow("Could not load language JSON for en: 404");
+    expect(fetchLanguage).toHaveBeenCalledWith("./languages/en.json");
   });
 });
 
@@ -293,6 +363,42 @@ describe("html and config helpers", () => {
     ).toEqual({
       valid: true,
       errors: [],
+      warnings: []
+    });
+  });
+
+  it("validateConfig accepts language arrays", () => {
+    expect(
+      validateConfig({
+        description: "Daily XKCD",
+        formSchema: {},
+        language: ["de", "en-US"],
+        name: "xkcd",
+        nativeSettings: {},
+        renderPage: "render.html",
+        version: "1.0.0"
+      })
+    ).toEqual({
+      valid: true,
+      errors: [],
+      warnings: []
+    });
+  });
+
+  it("validateConfig rejects invalid language arrays", () => {
+    expect(
+      validateConfig({
+        description: "Daily XKCD",
+        formSchema: {},
+        language: ["de", "", "../en"],
+        name: "xkcd",
+        nativeSettings: {},
+        renderPage: "render.html",
+        version: "1.0.0"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["language must be an array of non-empty language codes"],
       warnings: []
     });
   });

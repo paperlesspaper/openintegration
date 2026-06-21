@@ -13,6 +13,10 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isLanguageCode(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value.trim());
+}
+
 export function validateConfig(config: unknown): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -39,6 +43,13 @@ export function validateConfig(config: unknown): ValidationResult {
 
   if ("settingsPage" in config && typeof config.settingsPage !== "string") {
     errors.push("settingsPage must be a string");
+  }
+
+  if (
+    "language" in config &&
+    (!Array.isArray(config.language) || config.language.some((language) => !isLanguageCode(language)))
+  ) {
+    errors.push("language must be an array of non-empty language codes");
   }
 
   if ("nativeSettings" in config && !isRecord(config.nativeSettings)) {

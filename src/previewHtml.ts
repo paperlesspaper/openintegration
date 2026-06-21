@@ -13,12 +13,17 @@ function serializeForScript(value: unknown): string {
   return JSON.stringify(value ?? null).replace(/</g, "\\u003c");
 }
 
+const defaultPreviewFavicon = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#101315"/><path d="M8 10l6 6-6 6" fill="none" stroke="#f5f7f8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 23h8" fill="none" stroke="#f5f7f8" stroke-width="3" stroke-linecap="round"/></svg>'
+)}`;
+
 const icons: Record<string, string> = {
   cpu: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg>',
   download: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>',
   eye: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
   fileJson: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>',
   form: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/></svg>',
+  image: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>',
   monitor: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect width="20" height="14" x="2" y="3" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg>',
   pulse: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 8L9 4l-3 8H2"/></svg>',
   refresh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 0 1-15.54 6.22L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.54 5.78L21 8"/><path d="M21 3v5h-5"/></svg>',
@@ -30,6 +35,14 @@ const icons: Record<string, string> = {
 
 function icon(name: keyof typeof icons): string {
   return icons[name];
+}
+
+function toPreviewAssetPath(value: string): string {
+  if (/^https?:\/\//.test(value)) {
+    return value;
+  }
+
+  return `/${value.replace(/^\.?\//, "")}`;
 }
 
 export function createPreviewHtml({
@@ -51,6 +64,27 @@ export function createPreviewHtml({
     : "";
   const settingsHref = settingsPath ? escapeHtml(settingsPath) : settingsPage;
   const escapedConfigUrl = escapeHtml(configUrl);
+  const iconPath = typeof config.icon === "string" && config.icon.trim()
+    ? toPreviewAssetPath(config.icon)
+    : undefined;
+  const topbarTitleClass = iconPath ? "topbar-title" : "topbar-title no-icon";
+  const faviconPath = iconPath ?? defaultPreviewFavicon;
+  const iconHtml = iconPath
+    ? `<img class="integration-icon" src="${escapeHtml(iconPath)}" alt="" aria-hidden="true">`
+    : "";
+  const languageCodes = Array.isArray(config.language)
+    ? config.language.filter((language): language is string => typeof language === "string" && language.trim() !== "")
+    : [];
+  const languageFieldHtml = languageCodes.length > 0
+    ? `<label class="field">
+              <span class="field-title">Language</span>
+              <select id="language">
+                ${languageCodes
+                  .map((language) => `<option value="${escapeHtml(language)}">${escapeHtml(language)}</option>`)
+                  .join("\n                ")}
+              </select>
+            </label>`
+    : "";
 
   return `<!doctype html>
 <html lang="en">
@@ -58,6 +92,7 @@ export function createPreviewHtml({
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>${title} - paperlesspaper preview</title>
+    <link rel="icon" href="${escapeHtml(faviconPath)}" />
     <style>
       :root {
         color-scheme: light dark;
@@ -68,9 +103,9 @@ export function createPreviewHtml({
         --panel: #14181a;
         --panel-2: #101315;
         --field: #090b0c;
-        --accent: #00FF00;
-        --accent-fg: #000000;
-        --danger: #FF0000;
+        --accent: #f5f7f8;
+        --accent-fg: #090b0c;
+        --danger: #d4d8da;
         font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
@@ -106,7 +141,14 @@ export function createPreviewHtml({
       .topbar-title {
         min-width: 0;
         display: grid;
-        gap: 2px;
+        grid-template-columns: auto minmax(0, 1fr);
+        column-gap: 12px;
+        row-gap: 2px;
+        align-items: center;
+      }
+
+      .topbar-title.no-icon {
+        grid-template-columns: minmax(0, 1fr);
       }
 
       .topbar-kicker {
@@ -118,6 +160,22 @@ export function createPreviewHtml({
         font-weight: 750;
         letter-spacing: 0;
         text-transform: uppercase;
+      }
+
+      .title-copy {
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+      }
+
+      .integration-icon {
+        width: 42px;
+        height: 42px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #FFFFFF;
+        object-fit: contain;
+        padding: 5px;
       }
 
       .topbar-meta {
@@ -496,6 +554,92 @@ export function createPreviewHtml({
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
+      .manifest-preview {
+        display: grid;
+        gap: 10px;
+      }
+
+      .variants-header {
+        display: grid;
+        gap: 8px;
+      }
+
+      .variants-header .actions {
+        grid-template-columns: 1fr;
+      }
+
+      .variants-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .variant-card {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        overflow: hidden;
+        background: var(--field);
+      }
+
+      .variant-card-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        padding: 8px;
+      }
+
+      .variant-card-header button {
+        width: auto;
+        padding: 0 10px;
+      }
+
+      .variant-title {
+        color: var(--fg);
+        font-size: 12px;
+        font-weight: 750;
+        line-height: 1.25;
+        overflow-wrap: anywhere;
+      }
+
+      .variant-settings {
+        margin: 0;
+        padding: 0 8px 8px;
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .variant-screenshots {
+        display: grid;
+        gap: 8px;
+        padding: 0 8px 8px;
+      }
+
+      .variant-screenshot {
+        display: grid;
+        gap: 5px;
+        margin: 0;
+      }
+
+      .variant-screenshot img {
+        width: 100%;
+        aspect-ratio: 5 / 3;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        background: #FFFFFF;
+        object-fit: contain;
+      }
+
+      .variant-screenshot figcaption {
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.3;
+        overflow-wrap: anywhere;
+      }
+
       .sidebar-footer {
         margin-top: auto;
         padding-top: 2px;
@@ -556,10 +700,13 @@ export function createPreviewHtml({
   <body>
     <div class="app">
       <header class="topbar">
-        <div class="topbar-title">
-          <div class="topbar-kicker"><span class="button-icon">${icon("terminal")}</span>OpenIntegration preview</div>
-          <h1>${title}</h1>
-          <div class="topbar-meta">v${version} · ${renderPage}</div>
+        <div class="${topbarTitleClass}">
+          ${iconHtml}
+          <div class="title-copy">
+            <div class="topbar-kicker"><span class="button-icon">${icon("terminal")}</span>OpenIntegration preview</div>
+            <h1>${title}</h1>
+            <div class="topbar-meta">v${version} · ${renderPage}</div>
+          </div>
         </div>
 
         <div class="topbar-controls">
@@ -621,6 +768,7 @@ export function createPreviewHtml({
                 <option value="green-light">green-light</option>
               </select>
             </label>
+            ${languageFieldHtml}
             <div class="settings-form" id="form-fields"></div>
           </div>
         </details>
@@ -652,6 +800,22 @@ export function createPreviewHtml({
               <strong>Settings schema</strong>
               Waiting for manifest.
             </div>
+          </div>
+        </details>
+
+        <details open>
+          <summary><span class="button-icon">${icon("image")}</span><span>Config Variants</span></summary>
+          <div class="details-body manifest-preview">
+            <div class="variants-header">
+              <div class="status" id="variants-status">
+                <strong>Variants</strong>
+                Waiting for manifest.
+              </div>
+              <div class="actions">
+                <button id="regenerate-variants" title="Regenerate configured screenshots"><span class="button-icon">${icon("refresh")}</span><span>Regenerate</span></button>
+              </div>
+            </div>
+            <div class="variants-list" id="variants-list"></div>
           </div>
         </details>
 
@@ -701,9 +865,13 @@ export function createPreviewHtml({
       const schemaStatus = document.querySelector("#schema-status");
       const rendererStatus = document.querySelector("#renderer-status");
       const rendererDownload = document.querySelector("#renderer-download");
+      const variantsStatus = document.querySelector("#variants-status");
+      const variantsList = document.querySelector("#variants-list");
+      const regenerateVariants = document.querySelector("#regenerate-variants");
       const viewport = document.querySelector("#viewport");
       const viewportPresets = [...document.querySelectorAll("[data-viewport]")];
       const color = document.querySelector("#color");
+      const language = document.querySelector("#language");
       const colorThemes = [
         "black",
         "white",
@@ -732,6 +900,7 @@ export function createPreviewHtml({
       const defaultSettingsValue = JSON.stringify(defaultPluginSettings, null, 2);
       const defaultColorValue =
         typeof defaultPluginSettings.color === "string" ? defaultPluginSettings.color : basePayload.meta.color || "";
+      const defaultLanguageValue = typeof basePayload.meta.language === "string" ? basePayload.meta.language : "";
       const defaultViewportValue = viewport.value;
       const storageKey = [
         "paperlesspaper-openintegration",
@@ -742,6 +911,9 @@ export function createPreviewHtml({
 
       settings.value = defaultSettingsValue;
       selectValue(color, defaultColorValue, "");
+      if (language) {
+        selectValue(language, defaultLanguageValue, language.options[0]?.value || "");
+      }
       syncSettingsColorFromSelect();
 
       function isObject(value) {
@@ -771,6 +943,59 @@ export function createPreviewHtml({
               return "&#039;";
           }
         });
+      }
+
+      function assetUrl(value, cacheBust) {
+        if (typeof value !== "string" || !value.trim()) {
+          return "";
+        }
+
+        const url = /^https?:\\/\\//.test(value)
+          ? new URL(value)
+          : new URL(value.replace(/^\\.?\\//, "/"), window.location.href);
+
+        if (cacheBust) {
+          url.searchParams.set("t", String(cacheBust));
+        }
+
+        return url.href;
+      }
+
+      function settingsFromVariant(variant) {
+        if (!isObject(variant)) {
+          return {};
+        }
+
+        const values = {};
+
+        for (const [key, value] of Object.entries(variant)) {
+          if (key !== "screenshots") {
+            values[key] = value;
+          }
+        }
+
+        return values;
+      }
+
+      function variantTitle(index, variant) {
+        const values = settingsFromVariant(variant);
+        const parts = Object.entries(values)
+          .filter(([, value]) => typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+          .slice(0, 3)
+          .map(([key, value]) => key + "=" + String(value));
+
+        return "Variant " + (index + 1) + (parts.length ? " · " + parts.join(" · ") : "");
+      }
+
+      function variantSettingsSummary(variant) {
+        const values = settingsFromVariant(variant);
+        const text = JSON.stringify(values, null, 2);
+
+        if (text.length <= 360) {
+          return text;
+        }
+
+        return text.slice(0, 357) + "...";
       }
 
       function selectValue(select, value, fallback) {
@@ -871,6 +1096,7 @@ export function createPreviewHtml({
             storageKey,
             JSON.stringify({
               color: color.value,
+              language: language?.value,
               settings: settings.value,
               viewport: viewport.value
             })
@@ -892,6 +1118,14 @@ export function createPreviewHtml({
           selectValue(color, state.color, defaultColorValue);
         } else {
           syncColorFromJson();
+        }
+
+        if (language) {
+          if (typeof state.language === "string") {
+            selectValue(language, state.language, defaultLanguageValue);
+          } else {
+            selectValue(language, defaultLanguageValue, language.options[0]?.value || "");
+          }
         }
 
         if (typeof state.viewport === "string") {
@@ -916,6 +1150,9 @@ export function createPreviewHtml({
 
         settings.value = defaultSettingsValue;
         selectValue(color, defaultColorValue, "");
+        if (language) {
+          selectValue(language, defaultLanguageValue, language.options[0]?.value || "");
+        }
         selectValue(viewport, defaultViewportValue, defaultViewportValue);
         cacheSuppressed = true;
         syncSettingsColorFromSelect();
@@ -947,6 +1184,7 @@ export function createPreviewHtml({
           meta: {
             ...basePayload.meta,
             color: color.value || undefined,
+            language: language?.value || basePayload.meta.language,
             pluginSettings
           }
         };
@@ -1186,6 +1424,127 @@ export function createPreviewHtml({
         setPanel(schemaStatus, "Settings schema", formFields.children.length + " generated field(s).");
       }
 
+      function applyVariant(variant, index) {
+        const nextSettings = settingsFromVariant(variant);
+
+        syncingJson = true;
+        settings.value = JSON.stringify(nextSettings, null, 2);
+        syncingJson = false;
+        syncColorFromJson();
+        syncFormFromJson();
+        cacheState("Variant " + (index + 1) + " applied.");
+        reloadFrame();
+      }
+
+      function renderConfigVariants(cacheBust) {
+        variantsList.innerHTML = "";
+        const variants = Array.isArray(config.configVariants) ? config.configVariants : [];
+
+        if (variants.length === 0) {
+          setPanel(variantsStatus, "Variants", "No configVariants found.");
+          regenerateVariants.disabled = true;
+          return;
+        }
+
+        regenerateVariants.disabled = false;
+
+        variants.forEach((variant, index) => {
+          const card = document.createElement("article");
+          card.className = "variant-card";
+
+          const header = document.createElement("div");
+          header.className = "variant-card-header";
+
+          const title = document.createElement("div");
+          title.className = "variant-title";
+          title.textContent = variantTitle(index, variant);
+
+          const apply = document.createElement("button");
+          apply.type = "button";
+          apply.textContent = "Apply";
+          apply.addEventListener("click", () => applyVariant(variant, index));
+
+          header.append(title, apply);
+          card.append(header);
+
+          const summary = document.createElement("pre");
+          summary.className = "variant-settings";
+          summary.textContent = variantSettingsSummary(variant);
+          card.append(summary);
+
+          const screenshots = isObject(variant) && isObject(variant.screenshots) ? variant.screenshots : {};
+          const screenshotEntries = Object.entries(screenshots);
+
+          if (screenshotEntries.length > 0) {
+            const grid = document.createElement("div");
+            grid.className = "variant-screenshots";
+
+            for (const [size, path] of screenshotEntries) {
+              if (typeof path !== "string") {
+                continue;
+              }
+
+              const figure = document.createElement("figure");
+              figure.className = "variant-screenshot";
+
+              const image = document.createElement("img");
+              image.src = assetUrl(path, cacheBust);
+              image.alt = variantTitle(index, variant) + " " + size;
+              image.loading = "lazy";
+
+              const caption = document.createElement("figcaption");
+              caption.textContent = size + " · " + path;
+
+              figure.append(image, caption);
+              grid.append(figure);
+            }
+
+            card.append(grid);
+          }
+
+          variantsList.append(card);
+        });
+
+        setPanel(variantsStatus, "Variants", variants.length + " configured variant(s).");
+      }
+
+      async function regenerateConfigVariantScreenshots() {
+        const started = Date.now();
+
+        regenerateVariants.disabled = true;
+        setPanel(variantsStatus, "Regenerating", "Rendering configured screenshots.");
+
+        try {
+          const response = await fetch("/__paperless/config-variants/regenerate", {
+            method: "POST"
+          });
+          const result = await response.json();
+          const failures = Array.isArray(result.results)
+            ? result.results.filter((entry) => entry && entry.ok === false)
+            : [];
+
+          renderConfigVariants(Date.now());
+
+          if (!response.ok || failures.length > 0) {
+            const detail = failures.slice(0, 3)
+              .map((entry) => escapeText(entry.viewport || "unknown") + ": " + escapeText(entry.reason || "failed"))
+              .join("<br>");
+            setPanel(variantsStatus, "Regeneration failed", detail || "Could not regenerate screenshots.");
+            return;
+          }
+
+          setPanel(
+            variantsStatus,
+            "Screenshots regenerated",
+            String(result.generated || 0) + " file(s) in " + (Date.now() - started) + "ms."
+          );
+        } catch (error) {
+          setPanel(variantsStatus, "Regeneration failed", escapeText(error.message || error));
+        } finally {
+          regenerateVariants.disabled = false;
+        }
+      }
+
       function frameUrl() {
         const url = new URL(renderPath, window.location.href);
         return url.href;
@@ -1422,6 +1781,7 @@ export function createPreviewHtml({
       document.querySelector("#send").addEventListener("click", sendInit);
       document.querySelector("#reload").addEventListener("click", reloadFrame);
       document.querySelector("#reset").addEventListener("click", resetCachedState);
+      regenerateVariants.addEventListener("click", regenerateConfigVariantScreenshots);
       document.querySelector("#puppeteer-render").addEventListener("click", () => {
         renderWithPuppeteerOutput({
           downloadSuffix: "puppeteer",
@@ -1471,6 +1831,10 @@ export function createPreviewHtml({
         cacheState("Settings saved.");
         reloadFrame();
       });
+      language?.addEventListener("change", () => {
+        cacheState("Language saved.");
+        reloadFrame();
+      });
       settings.addEventListener("input", () => {
         syncFormFromJson();
         syncColorFromJson();
@@ -1500,6 +1864,7 @@ export function createPreviewHtml({
 
       hydrateCachedState();
       renderFormFields();
+      renderConfigVariants();
       applyViewport();
       reloadSettingsFrame();
       reloadFrame();

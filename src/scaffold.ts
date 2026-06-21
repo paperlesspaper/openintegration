@@ -41,6 +41,7 @@ function configTemplate(name: string): string {
     version: "0.1.0",
     description: `Displays ${name} on a paperlesspaper eInk display.`,
     renderPage: "./render.html",
+    language: ["de", "en"],
     nativeSettings: {
       title: name,
       limit: 5
@@ -82,6 +83,7 @@ paperlesspaper-openintegration render ./config.json --viewport 800x480 --output 
 
 - \`config.json\`: integration manifest, defaults, and generated settings form.
 - \`render.html\`: static render page. It must call \`markReady()\` when the frame is complete.
+- \`languages/*.json\`: localized copy loaded from the host-selected payload language.
 - \`api/data.js\`: optional local API handler used by the dev server.
 `;
 }
@@ -100,11 +102,13 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
         const data = await response.json();`
     : `const data = {
           title: settings.title,
-          items: [
-            "Replace this starter content with your integration data.",
-            "Keep text concise and high contrast for eInk.",
-            "Run the CLI render command for both landscape and portrait."
-          ].slice(0, settings.limit)
+          items: (Array.isArray(messages.items)
+            ? messages.items.filter((item) => typeof item === "string")
+            : [
+                "Replace this starter content with your integration data.",
+                "Keep text concise and high contrast for eInk.",
+                "Run the CLI render command for both landscape and portrait."
+              ]).slice(0, settings.limit)
         };`;
 
   return `<!doctype html>
@@ -164,6 +168,7 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
         getSettings,
         getQuerySettings,
         mergeSettings,
+        loadLanguageJson,
         applyColorThemeFromQuery,
         markReady,
         markError,
@@ -176,6 +181,7 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
 
       try {
         const payload = await waitForPayload({ timeoutMs: 500 });
+        const { messages } = await loadLanguageJson(payload);
         applyColorThemeFromQuery({ defaultTheme: "light" });
 
         const settings = mergeSettings(
@@ -188,6 +194,7 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
         ${loadData}
 
         const items = Array.isArray(data.items) ? data.items.slice(0, settings.limit) : [];
+        const footer = typeof messages.footer === "string" ? messages.footer : "";
         app.innerHTML = \`
           <header class="pp-header">
             <div>
@@ -200,6 +207,8 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
               .map((item) => \`<div class="item pp-fit">\${escapeHtml(item)}</div>\`)
               .join("")}
           </section>
+
+          \${footer ? \`<footer class="pp-footer">\${escapeHtml(footer)}</footer>\` : ""}
         \`;
 
         await document.fonts?.ready;
@@ -239,12 +248,38 @@ export default async function handler({ query }) {
 `;
 }
 
+function languageTemplate(language: "de" | "en", name: string): string {
+  return json(
+    language === "de"
+      ? {
+          footer: "Text aus languages/de.json",
+          items: [
+            "Ersetze diesen Starter-Inhalt durch deine Integrationsdaten.",
+            "Halte Text kurz und kontrastreich fuer eInk.",
+            "Teste die CLI-Renderausgabe im Hoch- und Querformat."
+          ],
+          title: name
+        }
+      : {
+          footer: "Text from languages/en.json",
+          items: [
+            "Replace this starter content with your integration data.",
+            "Keep text concise and high contrast for eInk.",
+            "Run the CLI render command for both landscape and portrait."
+          ],
+          title: name
+        }
+  );
+}
+
 export function buildScaffoldFiles(options: ScaffoldOptions): ScaffoldFile[] {
   const name = options.name?.trim() || safeNameFromDir(options.targetDir);
   const api = options.api ?? true;
   const files: ScaffoldFile[] = [
     { path: "config.json", body: configTemplate(name) },
     { path: "render.html", body: renderTemplate({ api, name }) },
+    { path: "languages/de.json", body: languageTemplate("de", name) },
+    { path: "languages/en.json", body: languageTemplate("en", name) },
     { path: "README.md", body: readmeTemplate(name) }
   ];
 

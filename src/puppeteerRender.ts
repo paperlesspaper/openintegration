@@ -1,4 +1,5 @@
 import type { Browser, Page } from "puppeteer-core";
+import type { AutoProcessingIntent } from "epdoptimize";
 import { optimizePngForSpectra6, type EpdOptimizeResult } from "./epdOptimize";
 import type { JsonRecord } from "./types";
 
@@ -21,7 +22,20 @@ export interface PuppeteerRenderResult {
   width: number;
 }
 
+export interface EpdOptimizeMetaSettings {
+  enabled?: boolean;
+  intent?: AutoProcessingIntent;
+}
+
 const MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const EPD_OPTIMIZE_META_NAME = "paperless:epd-optimize";
+const EPD_OPTIMIZE_INTENTS = new Set<AutoProcessingIntent>([
+  "faithful",
+  "lowNoise",
+  "natural",
+  "readable",
+  "vivid"
+]);
 const COLOR_THEME_CLASSES = [
   "dark",
   "light",
@@ -46,6 +60,68 @@ function resolveChromePath(chromePath?: string): string | undefined {
     process.env.PUPPETEER_EXECUTABLE_PATH ||
     (process.platform === "darwin" ? MAC_CHROME_PATH : undefined)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isEpdOptimizeIntent(value: unknown): value is AutoProcessingIntent {
+  return typeof value === "string" && EPD_OPTIMIZE_INTENTS.has(value as AutoProcessingIntent);
+}
+
+function normalizeEpdOptimizeSettings(value: unknown): EpdOptimizeMetaSettings | undefined {
+  if (typeof value === "boolean") {
+    return { enabled: value };
+  }
+
+  if (isEpdOptimizeIntent(value)) {
+    return { intent: value };
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const settings: EpdOptimizeMetaSettings = {};
+
+  if (typeof value.enabled === "boolean") {
+    settings.enabled = value.enabled;
+  }
+
+  if (isEpdOptimizeIntent(value.intent)) {
+    settings.intent = value.intent;
+  }
+
+  return Object.keys(settings).length > 0 ? settings : undefined;
+}
+
+export function parseEpdOptimizeMetaContent(content: string | null | undefined): EpdOptimizeMetaSettings | undefined {
+  const trimmed = content?.trim();
+
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const shorthand = normalizeEpdOptimizeSettings(trimmed);
+
+  if (shorthand) {
+    return shorthand;
+  }
+
+  try {
+    return normalizeEpdOptimizeSettings(JSON.parse(trimmed) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
+async function readEpdOptimizeMetaSettings(page: Page): Promise<EpdOptimizeMetaSettings | undefined> {
+  const content = await page.evaluate((metaName) => {
+    return document.querySelector(`meta[name="${metaName}"]`)?.getAttribute("content");
+  }, EPD_OPTIMIZE_META_NAME);
+
+  return parseEpdOptimizeMetaContent(content);
 }
 
 async function waitForOptionalNetworkIdle(page: Page): Promise<void> {
@@ -136,14 +212,16 @@ export async function renderUrlWithPuppeteer({
     await postInitPayload(page, payload);
     const ready = await waitForReady(page, readyTimeoutMs);
     await waitForOptionalNetworkIdle(page);
+    const epdOptimizeSettings = optimize ? await readEpdOptimizeMetaSettings(page) : undefined;
     const screenshot = await page.screenshot({
       fullPage: false,
       type: "png"
     });
     const rawBuffer = Buffer.from(screenshot);
-    const epd = optimize
+    const epd = optimize && epdOptimizeSettings?.enabled !== false
       ? await optimizePngForSpectra6(rawBuffer, {
           height,
+          intent: epdOptimizeSettings?.intent,
           width
         })
       : undefined;

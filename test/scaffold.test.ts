@@ -12,16 +12,24 @@ describe("integration scaffold", () => {
     });
     const config = JSON.parse(files.find((file) => file.path === "config.json")?.body ?? "{}");
     const render = files.find((file) => file.path === "render.html")?.body ?? "";
+    const de = JSON.parse(files.find((file) => file.path === "languages/de.json")?.body ?? "{}");
 
     expect(validateConfig(config)).toEqual({
       errors: [],
       valid: true,
       warnings: []
     });
+    expect(config.language).toEqual(["de", "en"]);
     expect(render).toContain("waitForPayload");
+    expect(render).toContain("loadLanguageJson");
     expect(render).toContain("markReady()");
     expect(render).toContain("./api/data");
     expect(files.map((file) => file.path)).toContain("api/data.js");
+    expect(files.map((file) => file.path)).toContain("languages/de.json");
+    expect(files.map((file) => file.path)).toContain("languages/en.json");
+    expect(de).toMatchObject({
+      footer: "Text aus languages/de.json"
+    });
   });
 
   it("can build a static-only starter", () => {
@@ -47,5 +55,8 @@ describe("integration scaffold", () => {
 
     const config = JSON.parse(await readFile(join(targetDir, "config.json"), "utf8"));
     expect(config.name).toBe("Starter");
+    await expect(readFile(join(targetDir, "languages/de.json"), "utf8")).resolves.toContain(
+      "languages/de.json"
+    );
   });
 });

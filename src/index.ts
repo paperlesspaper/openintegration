@@ -1,5 +1,10 @@
 export * from "./browser";
 export type {
+  LanguageJsonResult,
+  LoadLanguageJsonOptions,
+  ResolveLanguageOptions
+} from "./language";
+export type {
   ApplyColorThemeFromQueryOptions,
   ApplyColorThemeOptions,
   ColorThemeName

@@ -52,6 +52,18 @@ await build({
   target: "es2020"
 });
 
+await build({
+  entryPoints: [resolve(root, "src/layout-addon.ts")],
+  bundle: true,
+  format: "iife",
+  globalName: "PaperlessLayoutIntegration",
+  outfile: resolve(dist, "layout-addon.iife.js"),
+  platform: "browser",
+  sourcemap: false,
+  target: "es2020",
+  footer: { js: "Object.assign(globalThis.PaperlessOpenIntegration ||= {}, PaperlessLayoutIntegration);" }
+});
+
 await cp(resolve(root, "src/styles/paperless.css"), resolve(dist, "paperless.css"));
 
 const previewHtmlSource = await readFile(resolve(root, "src/previewHtml.ts"), "utf8");

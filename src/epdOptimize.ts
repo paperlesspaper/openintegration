@@ -1,18 +1,26 @@
+import { parseRenderRegions, type RenderRegion } from "./renderRegions";
 import { createCanvas, loadImage, type Canvas as NodeCanvas } from "@napi-rs/canvas";
 import {
-  aitjcizeSpectra6Palette,
   ditherImage,
   replaceColors,
   suggestCanvasProcessingOptions,
   type AutoProcessingIntent,
   type CanvasLike,
   type DitherImageOptions,
-  type ImageKind
+  type ImageKind,
+  type PaletteColorEntry
 } from "epdoptimize";
+import {
+  resolveEpdOptimizePalette,
+  type EpdOptimizePaletteName
+} from "./epdOptimizeMeta";
 
 export interface EpdOptimizeOptions {
+  regions?: RenderRegion[];
   height: number;
   intent?: AutoProcessingIntent;
+  options?: Partial<DitherImageOptions>;
+  paletteName?: EpdOptimizePaletteName;
   width: number;
 }
 
@@ -26,10 +34,6 @@ export interface EpdOptimizeResult {
   usedColors: string[];
   width: number;
 }
-
-const SPECTRA_DEVICE_COLORS = new Set(
-  aitjcizeSpectra6Palette.map((entry) => entry.deviceColor.toUpperCase())
-);
 
 function asCanvasLike(canvas: NodeCanvas): CanvasLike {
   return canvas as unknown as CanvasLike;
@@ -45,7 +49,8 @@ function rgbToHex(red: number, green: number, blue: number): string {
     .join("")}`.toUpperCase();
 }
 
-function getUsedDeviceColors(canvas: NodeCanvas): string[] {
+function getUsedDeviceColors(canvas: NodeCanvas, palette: PaletteColorEntry[]): string[] {
+  const deviceColors = new Set(palette.map((entry) => entry.deviceColor.toUpperCase()));
   const context = canvas.getContext("2d");
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const used = new Set<string>();
@@ -53,7 +58,7 @@ function getUsedDeviceColors(canvas: NodeCanvas): string[] {
   for (let index = 0; index < image.data.length; index += 4) {
     const color = rgbToHex(image.data[index], image.data[index + 1], image.data[index + 2]);
 
-    if (SPECTRA_DEVICE_COLORS.has(color)) {
+    if (deviceColors.has(color)) {
       used.add(color);
     }
   }
@@ -63,27 +68,56 @@ function getUsedDeviceColors(canvas: NodeCanvas): string[] {
 
 export async function optimizePngForSpectra6(
   sourcePng: Buffer,
-  { height, intent = "readable", width }: EpdOptimizeOptions
+  { height, intent = "readable", options = {}, paletteName, width, regions }: EpdOptimizeOptions
 ): Promise<EpdOptimizeResult> {
+  const palette = resolveEpdOptimizePalette(paletteName);
   const image = await loadImage(sourcePng);
   const inputCanvas = createCanvas(width, height) as NodeCanvas;
   const inputContext = inputCanvas.getContext("2d");
   inputContext.drawImage(image, 0, 0, width, height);
 
+  if (regions?.length) {
+    parseRenderRegions(JSON.stringify(regions), { width, height });
+    if (image.width !== width || image.height !== height) throw new Error("Layout screenshot dimensions do not match");
+    inputContext.fillStyle = "#fff";
+    for (const region of regions) inputContext.fillRect(region.x, region.y, region.width, region.height);
+    const base = await optimizePngForSpectra6(inputCanvas.toBuffer("image/png"), { width, height, paletteName, intent: "readable" });
+    inputContext.drawImage(await loadImage(base.buffer), 0, 0);
+    inputContext.imageSmoothingEnabled = false;
+    for (const region of regions) {
+      const patch = createCanvas(region.width, region.height);
+      const context = patch.getContext("2d");
+      context.drawImage(image, region.x, region.y, region.width, region.height, 0, 0, region.width, region.height);
+      let processed = patch.toBuffer("image/png");
+      if (region.settings?.enabled === false) {
+        const pixels = context.getImageData(0, 0, region.width, region.height).data;
+        const allowed = new Set(palette.map(color => color.deviceColor.toUpperCase()));
+        for (let i = 0; i < pixels.length; i += 4)
+          if (!allowed.has(rgbToHex(pixels[i], pixels[i + 1], pixels[i + 2])) || pixels[i + 3] !== 255)
+            throw new Error("Unprocessed layout regions must already use opaque device colors");
+      } else {
+        processed = (await optimizePngForSpectra6(processed, { width: region.width, height: region.height, paletteName,
+          intent: region.settings?.intent, options: region.settings?.options })).buffer;
+      }
+      inputContext.drawImage(await loadImage(processed), region.x, region.y);
+    }
+    return { ...base, buffer: inputCanvas.toBuffer("image/png"), usedColors: getUsedDeviceColors(inputCanvas, palette), reasons: ["Processed layout regions independently"] };
+  }
   const ditheredCanvas = createCanvas(width, height) as NodeCanvas;
   const deviceCanvas = createCanvas(width, height) as NodeCanvas;
   const suggestion = suggestCanvasProcessingOptions(
     asCanvasLike(inputCanvas),
-    aitjcizeSpectra6Palette,
+    palette,
     { intent }
   );
 
   await ditherImage(asCanvasLike(inputCanvas), asCanvasLike(ditheredCanvas), {
     ...suggestion.ditherOptions,
-    palette: aitjcizeSpectra6Palette
+    ...options,
+    palette
   });
 
-  replaceColors(asCanvasLike(ditheredCanvas), asCanvasLike(deviceCanvas), aitjcizeSpectra6Palette);
+  replaceColors(asCanvasLike(ditheredCanvas), asCanvasLike(deviceCanvas), palette);
 
   return {
     buffer: deviceCanvas.toBuffer("image/png"),
@@ -92,7 +126,7 @@ export async function optimizePngForSpectra6(
     intent: suggestion.intent,
     processingPreset: getProcessingPreset(suggestion.ditherOptions),
     reasons: suggestion.reasons,
-    usedColors: getUsedDeviceColors(deviceCanvas),
+    usedColors: getUsedDeviceColors(deviceCanvas, palette),
     width
   };
 }

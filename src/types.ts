@@ -23,7 +23,11 @@ export interface ValidationResult {
   warnings: string[];
 }
 
+export type PayloadUpdateHandler = (payload: JsonRecord, event: MessageEvent) => void | Promise<void>;
+
 export interface WaitForPayloadOptions {
+  onUpdate?: PayloadUpdateHandler;
+  source?: Window;
   timeout?: number;
   timeoutMs?: number;
   fallback?: JsonRecord;

@@ -1,7 +1,15 @@
+import { parseRenderRegions } from "./renderRegions";
+import { installEmbeddedRenderBridge } from "./renderEmbedded";
 import type { Browser, Page } from "puppeteer-core";
-import type { AutoProcessingIntent } from "epdoptimize";
 import { optimizePngForSpectra6, type EpdOptimizeResult } from "./epdOptimize";
+import {
+  EPD_OPTIMIZE_META_NAME,
+  parseEpdOptimizeMetaContent,
+  type EpdOptimizeMetaSettings
+} from "./epdOptimizeMeta";
 import type { JsonRecord } from "./types";
+
+export { parseEpdOptimizeMetaContent } from "./epdOptimizeMeta";
 
 export interface PuppeteerRenderOptions {
   chromePath?: string;
@@ -22,20 +30,7 @@ export interface PuppeteerRenderResult {
   width: number;
 }
 
-export interface EpdOptimizeMetaSettings {
-  enabled?: boolean;
-  intent?: AutoProcessingIntent;
-}
-
 const MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const EPD_OPTIMIZE_META_NAME = "paperless:epd-optimize";
-const EPD_OPTIMIZE_INTENTS = new Set<AutoProcessingIntent>([
-  "faithful",
-  "lowNoise",
-  "natural",
-  "readable",
-  "vivid"
-]);
 const COLOR_THEME_CLASSES = [
   "dark",
   "light",
@@ -60,60 +55,6 @@ function resolveChromePath(chromePath?: string): string | undefined {
     process.env.PUPPETEER_EXECUTABLE_PATH ||
     (process.platform === "darwin" ? MAC_CHROME_PATH : undefined)
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isEpdOptimizeIntent(value: unknown): value is AutoProcessingIntent {
-  return typeof value === "string" && EPD_OPTIMIZE_INTENTS.has(value as AutoProcessingIntent);
-}
-
-function normalizeEpdOptimizeSettings(value: unknown): EpdOptimizeMetaSettings | undefined {
-  if (typeof value === "boolean") {
-    return { enabled: value };
-  }
-
-  if (isEpdOptimizeIntent(value)) {
-    return { intent: value };
-  }
-
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const settings: EpdOptimizeMetaSettings = {};
-
-  if (typeof value.enabled === "boolean") {
-    settings.enabled = value.enabled;
-  }
-
-  if (isEpdOptimizeIntent(value.intent)) {
-    settings.intent = value.intent;
-  }
-
-  return Object.keys(settings).length > 0 ? settings : undefined;
-}
-
-export function parseEpdOptimizeMetaContent(content: string | null | undefined): EpdOptimizeMetaSettings | undefined {
-  const trimmed = content?.trim();
-
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const shorthand = normalizeEpdOptimizeSettings(trimmed);
-
-  if (shorthand) {
-    return shorthand;
-  }
-
-  try {
-    return normalizeEpdOptimizeSettings(JSON.parse(trimmed) as unknown);
-  } catch {
-    return undefined;
-  }
 }
 
 async function readEpdOptimizeMetaSettings(page: Page): Promise<EpdOptimizeMetaSettings | undefined> {
@@ -208,10 +149,19 @@ export async function renderUrlWithPuppeteer({
       width
     });
 
+    if (payload?.layout) await page.evaluateOnNewDocument(installEmbeddedRenderBridge);
     await page.goto(url, { timeout: 15000, waitUntil: "domcontentloaded" });
+    if (payload?.layout && new URL(page.url()).origin !== new URL(url).origin) throw new Error("Layout redirected to an unexpected origin");
     await postInitPayload(page, payload);
     const ready = await waitForReady(page, readyTimeoutMs);
     await waitForOptionalNetworkIdle(page);
+    let regions;
+    if (payload?.layout) {
+      const status = await page.evaluate(() => document.documentElement.dataset.paperlessRenderStatus);
+      if (!ready || status !== "ready") throw new Error("Layout did not finish successfully");
+      regions = parseRenderRegions(await page.evaluate(() => document.querySelector('meta[name="paperless:regions"]')?.getAttribute("content") ?? null), { width, height });
+      if (!regions) throw new Error("Layout did not report its regions");
+    }
     const epdOptimizeSettings = optimize ? await readEpdOptimizeMetaSettings(page) : undefined;
     const screenshot = await page.screenshot({
       fullPage: false,
@@ -221,7 +171,10 @@ export async function renderUrlWithPuppeteer({
     const epd = optimize && epdOptimizeSettings?.enabled !== false
       ? await optimizePngForSpectra6(rawBuffer, {
           height,
+          regions,
           intent: epdOptimizeSettings?.intent,
+          options: epdOptimizeSettings?.options,
+          paletteName: epdOptimizeSettings?.paletteName,
           width
         })
       : undefined;

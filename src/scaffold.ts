@@ -73,11 +73,19 @@ paperlesspaper OpenIntegration scaffold.
 
 ## Develop
 
+Install the local CLI helper first:
+
 \`\`\`sh
-paperlesspaper-openintegration check ./config.json
-paperlesspaper-openintegration dev ./config.json
-paperlesspaper-openintegration render ./config.json --viewport 800x480 --output render.png
+npm install --save-dev @paperlesspaper/openintegration
 \`\`\`
+
+\`\`\`sh
+npx paperless check
+npx paperless dev
+npx paperless render --viewport 800x480 --output render.png
+\`\`\`
+
+For a one-off run without a local install, use \`npx --package @paperlesspaper/openintegration paperless dev\`.
 
 ## Files
 
@@ -90,11 +98,11 @@ paperlesspaper-openintegration render ./config.json --viewport 800x480 --output 
 
 function renderTemplate({ api, name }: { api: boolean; name: string }): string {
   const loadData = api
-    ? `const url = new URL("./api/data", window.location.href);
-        url.searchParams.set("title", settings.title);
-        url.searchParams.set("limit", settings.limit);
-
-        const response = await fetch(url);
+    ? `const response = await fetch(new URL("./api/data", window.location.href), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: settings.title, limit: settings.limit })
+        });
         if (!response.ok) {
           throw new Error(\`API request failed: \${response.status}\`);
         }
@@ -170,6 +178,7 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
         mergeSettings,
         loadLanguageJson,
         applyColorThemeFromQuery,
+        markLoading,
         markReady,
         markError,
         fitAllText,
@@ -179,23 +188,24 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
 
       const app = document.querySelector("#app");
 
-      try {
-        const payload = await waitForPayload({ timeoutMs: 500 });
-        const { messages } = await loadLanguageJson(payload);
-        applyColorThemeFromQuery({ defaultTheme: "light" });
+      async function renderPayload(payload) {
+        try {
+          markLoading();
+          const { messages } = await loadLanguageJson(payload);
+          applyColorThemeFromQuery({ defaultTheme: "light" });
 
-        const settings = mergeSettings(
-          { title: ${JSON.stringify(name)}, limit: 5 },
-          getSettings(payload),
-          getQuerySettings()
-        );
-        settings.limit = Math.max(1, Math.min(12, Number(settings.limit) || 5));
+          const settings = mergeSettings(
+            { title: ${JSON.stringify(name)}, limit: 5 },
+            getSettings(payload),
+            getQuerySettings()
+          );
+          settings.limit = Math.max(1, Math.min(12, Number(settings.limit) || 5));
 
-        ${loadData}
+          ${loadData}
 
-        const items = Array.isArray(data.items) ? data.items.slice(0, settings.limit) : [];
-        const footer = typeof messages.footer === "string" ? messages.footer : "";
-        app.innerHTML = \`
+          const items = Array.isArray(data.items) ? data.items.slice(0, settings.limit) : [];
+          const footer = typeof messages.footer === "string" ? messages.footer : "";
+          app.innerHTML = \`
           <header class="pp-header">
             <div>
               <h1 class="pp-title pp-fit">\${escapeHtml(data.title || settings.title)}</h1>
@@ -211,13 +221,17 @@ function renderTemplate({ api, name }: { api: boolean; name: string }): string {
           \${footer ? \`<footer class="pp-footer">\${escapeHtml(footer)}</footer>\` : ""}
         \`;
 
-        await document.fonts?.ready;
-        fitAllText(".pp-fit", { min: 12, max: 72, step: 1, tolerance: 3, lineBreak: true });
-        fitToScreen(app);
-        markReady();
-      } catch (error) {
-        markError(error);
+          await document.fonts?.ready;
+          fitAllText(".pp-fit", { min: 12, max: 72, step: 1, tolerance: 3, lineBreak: true });
+          fitToScreen(app);
+          markReady();
+        } catch (error) {
+          markError(error);
+        }
       }
+
+      const payload = await waitForPayload({ timeoutMs: 500, onUpdate: renderPayload });
+      await renderPayload(payload);
     </script>
   </body>
 </html>

@@ -6,6 +6,10 @@ import ts from "typescript";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const dist = resolve(root, "dist");
+const openSansFiles = resolve(root, "node_modules/@fontsource/open-sans/files");
+const openSansDist = resolve(dist, "fonts");
+const openSansWeights = [300, 400, 500, 600, 700, 800];
+const openSansStyles = ["normal", "italic"];
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
@@ -13,7 +17,8 @@ await mkdir(dist, { recursive: true });
 await build({
   entryPoints: [
     resolve(root, "src/index.ts"),
-    resolve(root, "src/browser.ts")
+    resolve(root, "src/browser.ts"),
+    resolve(root, "src/ical.ts")
   ],
   bundle: true,
   format: "esm",
@@ -52,19 +57,21 @@ await build({
   target: "es2020"
 });
 
-await build({
-  entryPoints: [resolve(root, "src/layout-addon.ts")],
-  bundle: true,
-  format: "iife",
-  globalName: "PaperlessLayoutIntegration",
-  outfile: resolve(dist, "layout-addon.iife.js"),
-  platform: "browser",
-  sourcemap: false,
-  target: "es2020",
-  footer: { js: "globalThis.PaperlessOpenIntegration = { ...globalThis.PaperlessOpenIntegration, ...PaperlessLayoutIntegration };" }
-});
-
 await cp(resolve(root, "src/styles/paperless.css"), resolve(dist, "paperless.css"));
+await cp(resolve(root, "src/styles/settings.css"), resolve(dist, "settings.css"));
+await mkdir(openSansDist, { recursive: true });
+
+for (const weight of openSansWeights) {
+  for (const style of openSansStyles) {
+    const fileName = `open-sans-latin-${weight}-${style}.woff2`;
+    await cp(resolve(openSansFiles, fileName), resolve(openSansDist, fileName));
+  }
+}
+
+await cp(
+  resolve(root, "node_modules/@fontsource/open-sans/LICENSE"),
+  resolve(openSansDist, "open-sans-LICENSE.txt")
+);
 
 const previewHtmlSource = await readFile(resolve(root, "src/previewHtml.ts"), "utf8");
 const previewCssMatch = previewHtmlSource.match(/<style>\n([\s\S]*?)\n    <\/style>/);

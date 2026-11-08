@@ -26,7 +26,6 @@ beforeAll(async () => {
   assets.set("/runtime.js", await readFile(resolve("dist/paperless.iife.js")));
   if (process.env.LAYOUT_PROVIDER_DIR) {
     const provider = process.env.LAYOUT_PROVIDER_DIR;
-    assets.set("/runtime.js", await readFile(resolve(provider, "public/paperless.iife.js")));
     layoutHtml = await readFile(
       resolve(provider, "applications/layout/render.html"),
       "utf8"

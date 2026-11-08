@@ -540,6 +540,7 @@ export function createPreviewHtml({
       .settings-page-frame {
         width: 100%;
         height: 220px;
+        min-height: 160px;
         border: 1px solid var(--line);
         border-radius: 6px;
         background: #FFFFFF;
@@ -888,9 +889,20 @@ export function createPreviewHtml({
         "green-dark",
         "green-light"
       ];
+      const colorOptions = [
+        "",
+        "dark",
+        "light",
+        "red-dark",
+        "red-light",
+        "blue-dark",
+        "blue-light",
+        "green-dark",
+        "green-light"
+      ];
       let monitorTimer;
       let timeoutTimer;
-      let reloadTimer;
+      let messageTimer;
       let syncingJson = false;
       let cacheSuppressed = false;
       let deviceObjectUrl;
@@ -909,6 +921,7 @@ export function createPreviewHtml({
         renderPath
       ].join(":");
 
+      initColorControl();
       settings.value = defaultSettingsValue;
       selectValue(color, defaultColorValue, "");
       if (language) {
@@ -1007,6 +1020,20 @@ export function createPreviewHtml({
         select.value = fallback;
       }
 
+      function initColorControl() {
+        const schemaColorOptions = Array.isArray(config.formSchema?.properties?.color?.enum)
+          ? config.formSchema.properties.color.enum.filter((theme) => colorOptions.includes(theme))
+          : [];
+        const allowedColorOptions = schemaColorOptions.length > 0 ? schemaColorOptions : colorOptions;
+
+        color.innerHTML = allowedColorOptions
+          .map((theme) => {
+            const label = theme || "none";
+            return "<option value=\\"" + escapeText(theme) + "\\">" + escapeText(label) + "</option>";
+          })
+          .join("");
+      }
+
       function syncViewportPresets() {
         viewportPresets.forEach((button) => {
           button.setAttribute("aria-pressed", button.dataset.viewport === viewport.value ? "true" : "false");
@@ -1072,7 +1099,7 @@ export function createPreviewHtml({
         syncFormFromJson();
         syncColorFromJson();
         cacheState(reason);
-        scheduleReload(reason);
+        scheduleSendInit(reason);
         sendSettingsPageInit();
       }
 
@@ -1160,7 +1187,7 @@ export function createPreviewHtml({
         applyViewport();
         syncViewportPresets();
         setPanel(devStatus, "Cache reset", "Restored manifest defaults.");
-        reloadFrame();
+        sendInit();
         cacheSuppressed = false;
       }
 
@@ -1249,6 +1276,52 @@ export function createPreviewHtml({
         return "";
       }
 
+      function stringInputTypeForFormat(format) {
+        const normalized = typeof format === "string" ? format.toLowerCase() : "";
+        const inputTypes = {
+          "date": "date",
+          "time": "time",
+          "date-time": "datetime-local",
+          "datetime": "datetime-local",
+          "datetime-local": "datetime-local",
+          "email": "email",
+          "uri": "url",
+          "url": "url",
+          "password": "password",
+          "color": "color",
+          "tel": "tel",
+          "phone": "tel",
+          "month": "month",
+          "week": "week"
+        };
+
+        return inputTypes[normalized] || "text";
+      }
+
+      function isTextareaProperty(property) {
+        return (
+          property.format === "textarea" ||
+          property["ui:widget"] === "textarea" ||
+          Number.isInteger(property.rows)
+        );
+      }
+
+      function setOptionalAttribute(element, attribute, value) {
+        if (value !== undefined && value !== null && value !== "") {
+          element.setAttribute(attribute, String(value));
+        }
+      }
+
+      function applyInputAttributes(input, property) {
+        setOptionalAttribute(input, "min", property.minimum ?? property.min);
+        setOptionalAttribute(input, "max", property.maximum ?? property.max);
+        setOptionalAttribute(input, "step", property.step);
+        setOptionalAttribute(input, "minlength", property.minLength);
+        setOptionalAttribute(input, "maxlength", property.maxLength);
+        setOptionalAttribute(input, "pattern", property.pattern);
+        setOptionalAttribute(input, "placeholder", property.placeholder);
+      }
+
       function coerceFieldValue(element, schema) {
         const type = schema.type;
 
@@ -1298,7 +1371,7 @@ export function createPreviewHtml({
         settings.value = JSON.stringify(values, null, 2);
         syncingJson = false;
         cacheState("Settings saved.");
-        scheduleReload("Settings changed");
+        scheduleSendInit("Settings changed");
       }
 
       function syncFormFromJson() {
@@ -1361,22 +1434,28 @@ export function createPreviewHtml({
             empty.textContent = required ? "Select..." : "None";
             input.append(empty);
 
-            for (const optionValue of property.enum) {
+            for (const [optionIndex, optionValue] of property.enum.entries()) {
               const option = document.createElement("option");
               option.value = String(optionValue);
-              option.textContent = String(optionValue);
+              const optionLabel = property.enumNames?.[optionIndex];
+              option.textContent = typeof optionLabel === "string" ? optionLabel : String(optionValue);
               input.append(option);
             }
-          } else if (property.type === "array" || property.type === "object") {
+          } else if (property.type === "array" || property.type === "object" || isTextareaProperty(property)) {
             input = document.createElement("textarea");
-            input.rows = 4;
+            input.rows = Number.isInteger(property.rows) ? property.rows : 4;
           } else {
             input = document.createElement("input");
-            input.type = property.type === "number" || property.type === "integer" ? "number" : "text";
+            input.type =
+              property.type === "number" || property.type === "integer"
+                ? "number"
+                : stringInputTypeForFormat(property.format);
 
-            if (property.type === "integer") {
+            if (property.type === "integer" && property.step === undefined) {
               input.step = "1";
             }
+
+            applyInputAttributes(input, property);
           }
 
           wrapper.append(input);
@@ -1433,7 +1512,7 @@ export function createPreviewHtml({
         syncColorFromJson();
         syncFormFromJson();
         cacheState("Variant " + (index + 1) + " applied.");
-        reloadFrame();
+        sendInit();
       }
 
       function renderConfigVariants(cacheBust) {
@@ -1576,12 +1655,30 @@ export function createPreviewHtml({
         }
       }
 
+      function resetFrameReadyMarkers() {
+        const doc = iframe.contentDocument;
+        if (!doc?.body) {
+          return;
+        }
+
+        doc.getElementById("website-has-loaded")?.remove();
+
+        if (!doc.getElementById("website-has-loading-element")) {
+          const marker = doc.createElement("div");
+          marker.id = "website-has-loading-element";
+          marker.hidden = true;
+          doc.body.append(marker);
+        }
+      }
+
       function sendInit() {
         showLivePreview();
 
         try {
           const payload = currentPayload();
           applyFrameTheme();
+          resetFrameReadyMarkers();
+          console.log("[paperlesspaper-openintegration] sending INIT", payload);
           iframe.contentWindow?.postMessage(
             {
               type: "INIT",
@@ -1636,6 +1733,7 @@ export function createPreviewHtml({
       }
 
       function reloadFrame() {
+        clearTimeout(messageTimer);
         showLivePreview();
         applyViewport();
         cacheState("Preview values saved.");
@@ -1644,10 +1742,10 @@ export function createPreviewHtml({
         iframe.src = frameUrl();
       }
 
-      function scheduleReload(reason) {
-        clearTimeout(reloadTimer);
-        setPanel(renderStatus, "Reload queued", reason);
-        reloadTimer = setTimeout(reloadFrame, 250);
+      function scheduleSendInit(reason) {
+        clearTimeout(messageTimer);
+        setPanel(renderStatus, "INIT queued", reason);
+        messageTimer = setTimeout(sendInit, 250);
       }
 
       function reloadSettingsFrame() {
@@ -1672,6 +1770,14 @@ export function createPreviewHtml({
           return message.settings;
         }
 
+        if (
+          message.source === "paperlesspaper-plugin" &&
+          message.type === "UPDATE_SETTINGS" &&
+          isObject(message.payload)
+        ) {
+          return message.payload;
+        }
+
         if (isObject(message.data)) {
           if (isObject(message.data.pluginSettings)) {
             return message.data.pluginSettings;
@@ -1693,6 +1799,29 @@ export function createPreviewHtml({
         const message = event.data;
 
         if (!isObject(message)) {
+          return;
+        }
+
+        if (
+          message.source === "paperlesspaper-plugin" &&
+          message.type === "SET_HEIGHT"
+        ) {
+          const nextHeight = Number(message.payload?.height);
+
+          if (Number.isFinite(nextHeight) && nextHeight > 0) {
+            settingsFrame.style.height = Math.ceil(nextHeight) + "px";
+          }
+
+          return;
+        }
+
+        if (message.type === "paperlesspaper:settings:height") {
+          const nextHeight = Number(message.height);
+
+          if (Number.isFinite(nextHeight) && nextHeight > 0) {
+            settingsFrame.style.height = Math.ceil(nextHeight) + "px";
+          }
+
           return;
         }
 
@@ -1829,17 +1958,17 @@ export function createPreviewHtml({
         syncSettingsColorFromSelect();
         syncFormFromJson();
         cacheState("Settings saved.");
-        reloadFrame();
+        sendInit();
       });
       language?.addEventListener("change", () => {
         cacheState("Language saved.");
-        reloadFrame();
+        sendInit();
       });
       settings.addEventListener("input", () => {
         syncFormFromJson();
         syncColorFromJson();
         cacheState("Raw settings saved.");
-        scheduleReload("Raw settings changed");
+        scheduleSendInit("Raw settings changed");
       });
 
       if (window.EventSource) {

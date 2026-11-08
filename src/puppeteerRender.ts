@@ -17,6 +17,7 @@ export interface PuppeteerRenderOptions {
   optimize?: boolean;
   payload?: JsonRecord;
   readyTimeoutMs?: number;
+  timezone?: string;
   url: string;
   width: number;
 }
@@ -31,6 +32,12 @@ export interface PuppeteerRenderResult {
 }
 
 const MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const PUPPETEER_CHROME_ARGS = [
+  "--no-sandbox",
+  "--disable-font-subpixel-positioning",
+  "--disable-lcd-text",
+  "--font-render-hinting=none"
+];
 const COLOR_THEME_CLASSES = [
   "dark",
   "light",
@@ -129,6 +136,7 @@ export async function renderUrlWithPuppeteer({
   optimize = true,
   payload,
   readyTimeoutMs = 15000,
+  timezone,
   url,
   width
 }: PuppeteerRenderOptions): Promise<PuppeteerRenderResult> {
@@ -137,12 +145,15 @@ export async function renderUrlWithPuppeteer({
 
   try {
     browser = await puppeteer.launch({
-      args: ["--no-sandbox"],
+      args: PUPPETEER_CHROME_ARGS,
       executablePath: resolveChromePath(chromePath),
       headless: true
     });
 
     const page = await browser.newPage();
+    if (timezone) {
+      await page.emulateTimezone(timezone);
+    }
     await page.setViewport({
       deviceScaleFactor: 1,
       height,

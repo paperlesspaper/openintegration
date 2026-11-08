@@ -1,6 +1,5 @@
 import { createCanvas, loadImage, type Canvas as NodeCanvas } from "@napi-rs/canvas";
 import {
-  aitjcizeSpectra6Palette,
   ditherImage,
   replaceColors,
   suggestCanvasDitherOptions,
@@ -8,7 +7,8 @@ import {
   type AutoProcessingIntent,
   type CanvasLike,
   type DitherImageOptions,
-  type ImageKind
+  type ImageKind,
+  type PaletteColorEntry
 } from "epdoptimize";
 import type { Browser, Page } from "puppeteer-core";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -22,6 +22,13 @@ import {
   type DevServerOptions
 } from "./devServer";
 import { checkIntegration } from "./devCheck";
+import {
+  EPD_OPTIMIZE_META_NAME,
+  parseEpdOptimizeMetaContent,
+  resolveEpdOptimizePalette,
+  type EpdOptimizeMetaSettings,
+  type EpdOptimizePaletteName
+} from "./epdOptimizeMeta";
 import { scaffoldIntegration } from "./scaffold";
 import type { JsonRecord } from "./types";
 
@@ -55,14 +62,12 @@ interface ParsedArgs {
 const maxPort = 65535;
 const defaultEpdOutput: EpdOutputMode = "dithered";
 const MAC_CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const EPD_OPTIMIZE_META_NAME = "paperless:epd-optimize";
-const EPD_OPTIMIZE_INTENTS = new Set<AutoProcessingIntent>([
-  "faithful",
-  "lowNoise",
-  "natural",
-  "readable",
-  "vivid"
-]);
+const PUPPETEER_CHROME_ARGS = [
+  "--no-sandbox",
+  "--disable-font-subpixel-positioning",
+  "--disable-lcd-text",
+  "--font-render-hinting=none"
+];
 const COLOR_THEME_CLASSES = [
   "dark",
   "light",
@@ -79,43 +84,9 @@ const COLOR_THEME_CLASSES = [
   "red",
   "yellow"
 ];
-const SPECTRA_DEVICE_COLORS = new Set(
-  aitjcizeSpectra6Palette.map((entry) => entry.deviceColor.toUpperCase())
-);
-const ditherOptionKeys = new Set<keyof DitherImageOptions>([
-  "adjustmentEngine",
-  "algorithm",
-  "calibrate",
-  "clarity",
-  "colorMatching",
-  "ditheringType",
-  "dynamicRangeCompression",
-  "edgeAntialiasing",
-  "edgePreservation",
-  "errorDiffusionMatrix",
-  "levelCompression",
-  "numberOfSampleColors",
-  "orderedDitheringMatrix",
-  "orderedDitheringType",
-  "paperNormalization",
-  "preview",
-  "processingEngine",
-  "processingPreset",
-  "randomDitheringType",
-  "sampleColorsFromImage",
-  "serpentine",
-  "toneMapping"
-]);
-
-interface CliEpdOptimizeMetaSettings {
-  enabled?: boolean;
-  intent?: AutoProcessingIntent;
-  options?: Partial<DitherImageOptions>;
-}
-
 interface CliRawRenderResult {
   buffer: Buffer;
-  epdOptimizeSettings?: CliEpdOptimizeMetaSettings;
+  epdOptimizeSettings?: EpdOptimizeMetaSettings;
   height: number;
   ready: boolean;
   width: number;
@@ -133,12 +104,17 @@ interface CliEpdOptimizeResult {
   width: number;
 }
 
+const defaultConfigPath = "./config.json";
+
 function usage(): string {
   return `Usage:
-  paperlesspaper-openintegration dev [config.json] [options]
-  paperlesspaper-openintegration check [config.json] [options]
-  paperlesspaper-openintegration render [config.json] [options]
-  paperlesspaper-openintegration scaffold <directory> [options]
+  paperless dev [./config.json] [options]
+  paperless check [./config.json] [options]
+  paperless render [./config.json] [options]
+  paperless scaffold <directory> [options]
+
+Aliases:
+  paperlesspaper-openintegration
 
 Options:
   --name <name>              Integration display name for scaffold.
@@ -190,14 +166,6 @@ function safeSlug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "openintegration";
 }
 
-function isRecord(value: unknown): value is JsonRecord {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isEpdOptimizeIntent(value: unknown): value is AutoProcessingIntent {
-  return typeof value === "string" && EPD_OPTIMIZE_INTENTS.has(value as AutoProcessingIntent);
-}
-
 function parseEpdOutputMode(value: string): EpdOutputMode {
   if (value === "dithered" || value === "device" || value === "both") {
     return value;
@@ -225,7 +193,8 @@ function rgbToHex(red: number, green: number, blue: number): string {
     .join("")}`.toUpperCase();
 }
 
-function getUsedDeviceColors(canvas: NodeCanvas): string[] {
+function getUsedDeviceColors(canvas: NodeCanvas, palette: PaletteColorEntry[]): string[] {
+  const deviceColors = new Set(palette.map((entry) => entry.deviceColor.toUpperCase()));
   const context = canvas.getContext("2d");
   const image = context.getImageData(0, 0, canvas.width, canvas.height);
   const used = new Set<string>();
@@ -233,7 +202,7 @@ function getUsedDeviceColors(canvas: NodeCanvas): string[] {
   for (let index = 0; index < image.data.length; index += 4) {
     const color = rgbToHex(image.data[index], image.data[index + 1], image.data[index + 2]);
 
-    if (SPECTRA_DEVICE_COLORS.has(color)) {
+    if (deviceColors.has(color)) {
       used.add(color);
     }
   }
@@ -241,79 +210,7 @@ function getUsedDeviceColors(canvas: NodeCanvas): string[] {
   return Array.from(used).sort();
 }
 
-function normalizeMetaOptions(value: unknown): Partial<DitherImageOptions> {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  const options: Partial<DitherImageOptions> = {};
-
-  for (const [key, optionValue] of Object.entries(value)) {
-    if (ditherOptionKeys.has(key as keyof DitherImageOptions)) {
-      (options as Record<string, unknown>)[key] = optionValue;
-    }
-  }
-
-  return options;
-}
-
-function normalizeEpdOptimizeSettings(value: unknown): CliEpdOptimizeMetaSettings | undefined {
-  if (typeof value === "boolean") {
-    return { enabled: value };
-  }
-
-  if (isEpdOptimizeIntent(value)) {
-    return { intent: value };
-  }
-
-  if (!isRecord(value)) {
-    return undefined;
-  }
-
-  const settings: CliEpdOptimizeMetaSettings = {};
-  const options = {
-    ...normalizeMetaOptions(value),
-    ...normalizeMetaOptions(value.adjustmentOptions),
-    ...normalizeMetaOptions(value.ditherOptions),
-    ...normalizeMetaOptions(value.options)
-  };
-
-  if (typeof value.enabled === "boolean") {
-    settings.enabled = value.enabled;
-  }
-
-  if (isEpdOptimizeIntent(value.intent)) {
-    settings.intent = value.intent;
-  }
-
-  if (Object.keys(options).length > 0) {
-    settings.options = options;
-  }
-
-  return Object.keys(settings).length > 0 ? settings : undefined;
-}
-
-function parseEpdOptimizeMetaContent(content: string | null | undefined): CliEpdOptimizeMetaSettings | undefined {
-  const trimmed = content?.trim();
-
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const shorthand = normalizeEpdOptimizeSettings(trimmed);
-
-  if (shorthand) {
-    return shorthand;
-  }
-
-  try {
-    return normalizeEpdOptimizeSettings(JSON.parse(trimmed) as unknown);
-  } catch {
-    return undefined;
-  }
-}
-
-async function readEpdOptimizeMetaSettings(page: Page): Promise<CliEpdOptimizeMetaSettings | undefined> {
+async function readEpdOptimizeMetaSettings(page: Page): Promise<EpdOptimizeMetaSettings | undefined> {
   const content = await page.evaluate((metaName) => {
     return document.querySelector(`meta[name="${metaName}"]`)?.getAttribute("content");
   }, EPD_OPTIMIZE_META_NAME);
@@ -384,6 +281,7 @@ async function renderRawWithPuppeteer({
   height,
   payload,
   readyTimeoutMs = 15000,
+  timezone,
   url,
   width
 }: {
@@ -391,6 +289,7 @@ async function renderRawWithPuppeteer({
   height: number;
   payload?: JsonRecord;
   readyTimeoutMs?: number;
+  timezone?: string;
   url: string;
   width: number;
 }): Promise<CliRawRenderResult> {
@@ -399,12 +298,15 @@ async function renderRawWithPuppeteer({
 
   try {
     browser = await puppeteer.launch({
-      args: ["--no-sandbox"],
+      args: PUPPETEER_CHROME_ARGS,
       executablePath: resolveChromePath(chromePath),
       headless: true
     });
 
     const page = await browser.newPage();
+    if (timezone) {
+      await page.emulateTimezone(timezone);
+    }
     await page.setViewport({
       deviceScaleFactor: 1,
       height,
@@ -441,14 +343,17 @@ async function optimizePngForCliSpectra6(
     height,
     intent = "natural",
     options = {},
+    paletteName,
     width
   }: {
     height: number;
     intent?: AutoProcessingIntent;
     options?: Partial<DitherImageOptions>;
+    paletteName?: EpdOptimizePaletteName;
     width: number;
   }
 ): Promise<CliEpdOptimizeResult> {
+  const palette = resolveEpdOptimizePalette(paletteName);
   const image = await loadImage(sourcePng);
   const inputCanvas = createCanvas(width, height) as NodeCanvas;
   const inputContext = inputCanvas.getContext("2d");
@@ -458,12 +363,12 @@ async function optimizePngForCliSpectra6(
   const deviceCanvas = createCanvas(width, height) as NodeCanvas;
   const imageAuto = suggestCanvasImageAdjustmentOptions(
     asCanvasLike(inputCanvas),
-    aitjcizeSpectra6Palette,
+    palette,
     { intent }
   );
   const canvasAuto = suggestCanvasDitherOptions(
     asCanvasLike(inputCanvas),
-    aitjcizeSpectra6Palette,
+    palette,
     { intent }
   );
 
@@ -471,10 +376,10 @@ async function optimizePngForCliSpectra6(
     ...imageAuto.adjustmentOptions,
     ...canvasAuto.ditherOptions,
     ...options,
-    palette: aitjcizeSpectra6Palette
+    palette
   });
 
-  replaceColors(asCanvasLike(ditheredCanvas), asCanvasLike(deviceCanvas), aitjcizeSpectra6Palette);
+  replaceColors(asCanvasLike(ditheredCanvas), asCanvasLike(deviceCanvas), palette);
 
   return {
     deviceBuffer: deviceCanvas.toBuffer("image/png"),
@@ -484,7 +389,7 @@ async function optimizePngForCliSpectra6(
     intent: imageAuto.intent,
     presetName: canvasAuto.presetName,
     reasons: Array.from(new Set([...imageAuto.reasons, ...canvasAuto.reasons])),
-    usedColors: getUsedDeviceColors(deviceCanvas),
+    usedColors: getUsedDeviceColors(deviceCanvas, palette),
     width
   };
 }
@@ -724,13 +629,13 @@ async function main(): Promise<void> {
       console.log(`- ${file}`);
     }
     console.log("");
-    console.log(`Next: paperlesspaper-openintegration check ${result.targetDir}/config.json`);
+    console.log(`Next: paperless check ${result.targetDir}/config.json`);
 
     return;
   }
 
   if (args.command === "check") {
-    const result = await checkIntegration(args.configPath ?? "config.json");
+    const result = await checkIntegration(args.configPath ?? defaultConfigPath);
 
     if (args.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -752,7 +657,7 @@ async function main(): Promise<void> {
   }
 
   if (args.command === "render") {
-    const configPath = args.configPath ?? "config.json";
+    const configPath = args.configPath ?? defaultConfigPath;
     const config = await readConfig(configPath);
     const viewport = parseViewport(args.viewport);
     const server = await startDevServer({
@@ -785,6 +690,7 @@ async function main(): Promise<void> {
         height: viewport.height,
         payload,
         readyTimeoutMs: args.readyTimeoutMs,
+        timezone: config.timezone,
         url: renderUrl.href,
         width: viewport.width
       });
@@ -795,6 +701,7 @@ async function main(): Promise<void> {
             height: viewport.height,
             intent: rawResult.epdOptimizeSettings?.intent,
             options: rawResult.epdOptimizeSettings?.options,
+            paletteName: rawResult.epdOptimizeSettings?.paletteName,
             width: viewport.width
           })
         : undefined;
@@ -842,7 +749,7 @@ async function main(): Promise<void> {
 
   const server = await startDevServerWithPortFallback({
     color: args.color,
-    configPath: args.configPath ?? "config.json",
+    configPath: args.configPath ?? defaultConfigPath,
     frameKind: args.frameKind,
     host: args.host,
     language: args.language,

@@ -21,7 +21,9 @@ describe("integration scaffold", () => {
     });
     expect(config.language).toEqual(["de", "en"]);
     expect(render).toContain("waitForPayload");
+    expect(render).toContain("onUpdate: renderPayload");
     expect(render).toContain("loadLanguageJson");
+    expect(render).toContain("markLoading()");
     expect(render).toContain("markReady()");
     expect(render).toContain("./api/data");
     expect(files.map((file) => file.path)).toContain("api/data.js");

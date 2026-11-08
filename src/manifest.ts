@@ -17,6 +17,15 @@ function isLanguageCode(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(value.trim());
 }
 
+function isTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function validateConfig(config: unknown): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -50,6 +59,13 @@ export function validateConfig(config: unknown): ValidationResult {
     (!Array.isArray(config.language) || config.language.some((language) => !isLanguageCode(language)))
   ) {
     errors.push("language must be an array of non-empty language codes");
+  }
+
+  if (
+    "timezone" in config &&
+    (typeof config.timezone !== "string" || config.timezone.trim() === "" || !isTimeZone(config.timezone))
+  ) {
+    errors.push("timezone must be a valid IANA timezone");
   }
 
   if ("nativeSettings" in config && !isRecord(config.nativeSettings)) {

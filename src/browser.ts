@@ -1,6 +1,29 @@
+import { installEmbeddedRenderBridge } from "./renderEmbedded";
+if (typeof window !== "undefined") installEmbeddedRenderBridge();
+
 export { markError, markLoading, markReady } from "./ready";
+export { bootDepartureIntegration, renderDepartureBoard, fitDepartureBoard } from "./departures";
+export type { Departure, DepartureBoardData, DepartureBoardOptions } from "./departures";
+export { bootDashboardIntegration, renderDashboard, fitDashboard } from "./dashboard";
+export type { DashboardData, DashboardMetric, DashboardRow, DashboardOptions } from "./dashboard";
 export { waitForPayload } from "./runtime";
-export { getQuerySettings, getSettings, mergeSettings } from "./settings";
+export {
+  getQuerySettings,
+  getSettings,
+  getSettingsFromMessage,
+  getSettingsPageHeight,
+  mergeSettings,
+  observeSettingsHeight,
+  postSettingsHeight,
+  postSettingsReady,
+  postSettingsUpdate,
+  setupSettingsPage
+} from "./settings";
+export type {
+  PostSettingsMessageOptions,
+  SettingsHeightOptions,
+  SetupSettingsPageOptions
+} from "./settings";
 export { getPayloadLanguage, loadLanguageJson, resolveLanguage } from "./language";
 export type {
   LanguageJsonResult,
@@ -31,6 +54,54 @@ export {
 export { fitImage, fitToScreen } from "./resize";
 export { detectOverflow } from "./overflow";
 export { escapeHtml } from "./html";
+export {
+  fitOfTheDayLayout,
+  renderOfTheDayLayout,
+  waitForOfTheDayImage
+} from "./ofTheDay";
+export type {
+  FitOfTheDayLayoutOptions,
+  OfTheDayFact,
+  OfTheDayFitReport,
+  OfTheDayImageOptions,
+  OfTheDayLayoutElements,
+  OfTheDayLayoutMode,
+  OfTheDayMetaItem,
+  OfTheDayTextSize,
+  RenderOfTheDayLayoutOptions
+} from "./ofTheDay";
+export {
+  DEFAULT_CALENDAR_MESSAGES,
+  DEFAULT_CALENDAR_SETTINGS,
+  buildCalendarRange,
+  fitCalendarLayout,
+  normalizeCalendarSettings,
+  prepareCalendarEvents,
+  renderCalendarLayout,
+  waitForCalendarImages
+} from "./calendar";
+export { bootCalendarApiIntegration } from "./calendarIntegration";
+export type {
+  BootCalendarApiIntegrationOptions,
+  CalendarApiData,
+  CalendarApiIntegrationContext,
+  CalendarApiRequestContext
+} from "./calendarIntegration";
+export type {
+  CalendarDateValue,
+  CalendarDisplaySettings,
+  CalendarEvent,
+  CalendarEventDetail,
+  CalendarHeaderOptions,
+  CalendarLayoutElements,
+  CalendarMessages,
+  CalendarRange,
+  CalendarSettingsInput,
+  CalendarView,
+  FitCalendarLayoutOptions,
+  PreparedCalendarEvent,
+  RenderCalendarLayoutOptions
+} from "./calendar";
 export { validateConfig } from "./manifest";
 export type {
   FitHyphenatedTextOptions,
@@ -40,10 +111,11 @@ export type {
   JsonRecord,
   OpenIntegrationConfig,
   OverflowReport,
+  PayloadUpdateHandler,
   PrepareHyphenationOptions,
   ValidationResult,
   WaitForPayloadOptions
 } from "./types";
 
-export { bootLayoutIntegration, renderLayout, validateLayoutRects, sanitizeLayoutHtml } from "./layout";
+export { bootLayoutIntegration, renderLayout, sanitizeLayoutHtml, validateLayoutRects } from "./layout";
 export type { LayoutPayload, LayoutRegion } from "./layout";

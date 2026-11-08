@@ -67,6 +67,86 @@ describe("preview html", () => {
     expect(html).toContain('property.inStettingsPage === "true"');
   });
 
+  it("sends INIT instead of reloading the iframe when settings change", () => {
+    const html = createPreviewHtml({
+      config: {
+        formSchema: {
+          type: "object",
+          properties: {
+            message: {
+              type: "string",
+              title: "Message"
+            }
+          }
+        },
+        name: "Paperboy",
+        renderPage: "./render.html",
+        version: "0.1.0"
+      },
+      configUrl: "http://127.0.0.1:4300/config.json",
+      payload: {
+        meta: {
+          pluginSettings: {
+            message: "Hello"
+          }
+        }
+      },
+      renderPath: "/render.html"
+    });
+
+    expect(html).toContain("function scheduleSendInit(reason)");
+    expect(html).toContain("function resetFrameReadyMarkers()");
+    expect(html).toContain('console.log("[paperlesspaper-openintegration] sending INIT", payload);');
+    expect(html).toContain('setPanel(renderStatus, "INIT queued", reason);');
+    expect(html).toContain("messageTimer = setTimeout(sendInit, 250);");
+    expect(html).toContain('scheduleSendInit("Settings changed");');
+    expect(html).toContain('scheduleSendInit("Raw settings changed");');
+    expect(html).not.toContain("function scheduleReload(reason)");
+    expect(html).not.toContain('setPanel(renderStatus, "Reload queued", reason);');
+  });
+
+  it("maps string formats and number constraints to native inputs", () => {
+    const html = createPreviewHtml({
+      config: {
+        formSchema: {
+          type: "object",
+          properties: {
+            date: {
+              type: "string",
+              format: "date"
+            },
+            homepage: {
+              type: "string",
+              format: "url",
+              placeholder: "https://example.test"
+            },
+            count: {
+              type: "integer",
+              minimum: 1,
+              maximum: 12
+            }
+          }
+        },
+        name: "Paperboy",
+        renderPage: "./render.html",
+        version: "0.1.0"
+      },
+      configUrl: "http://127.0.0.1:4300/config.json",
+      payload: {
+        meta: {
+          pluginSettings: {}
+        }
+      },
+      renderPath: "/render.html"
+    });
+
+    expect(html).toContain('"date": "date"');
+    expect(html).toContain('"url": "url"');
+    expect(html).toContain(': stringInputTypeForFormat(property.format);');
+    expect(html).toContain('setOptionalAttribute(input, "min", property.minimum ?? property.min);');
+    expect(html).toContain('setOptionalAttribute(input, "placeholder", property.placeholder);');
+  });
+
   it("shows manifest icon and config variant screenshot controls", () => {
     const html = createPreviewHtml({
       config: {

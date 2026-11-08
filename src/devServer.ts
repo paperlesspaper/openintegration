@@ -28,6 +28,10 @@ export interface DevServerHandle {
 
 const defaultColor = "light";
 const fallbackLanguage = "de";
+const defaultJsonBodyLimit = 1024 * 1024;
+const apiJsonBodyLimit = 64 * 1024;
+
+class JsonBodyTooLargeError extends Error {}
 
 const mimeTypes: Record<string, string> = {
   ".css": "text/css; charset=utf-8",
@@ -85,11 +89,20 @@ function defaultLanguage(config: OpenIntegrationConfig): string {
     : fallbackLanguage;
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+async function readJsonBody(
+  request: IncomingMessage,
+  maxBytes = defaultJsonBodyLimit
+): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let length = 0;
 
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    length += buffer.byteLength;
+    if (length > maxBytes) {
+      throw new JsonBodyTooLargeError(`JSON body exceeds ${maxBytes} bytes`);
+    }
+    chunks.push(buffer);
   }
 
   if (chunks.length === 0) {
@@ -217,12 +230,18 @@ function resolveIntegrationPath(root: string, fileName: string): string {
 }
 
 async function tryServeApi(
+  request: IncomingMessage,
   response: ServerResponse,
   requestUrl: URL,
   integrationRoot: string
 ): Promise<boolean> {
   if (!requestUrl.pathname.startsWith("/api/")) {
     return false;
+  }
+
+  if (!['GET', 'HEAD', 'POST'].includes(request.method || 'GET')) {
+    send(response, 405, "Method not allowed", "text/plain; charset=utf-8");
+    return true;
   }
 
   const apiPath = resolve(integrationRoot, `.${requestUrl.pathname}.js`);
@@ -248,8 +267,28 @@ async function tryServeApi(
       return true;
     }
 
+    let body: JsonRecord = {};
+    if (request.method === "POST") {
+      let parsed: unknown;
+      try {
+        parsed = await readJsonBody(request, apiJsonBodyLimit);
+      } catch (error) {
+        sendJson(response, error instanceof JsonBodyTooLargeError ? 413 : 400, {
+          error: error instanceof JsonBodyTooLargeError
+            ? "Calendar API JSON body exceeds 64 KB"
+            : "Calendar API JSON body is invalid"
+        });
+        return true;
+      }
+      if (!isRecord(parsed)) {
+        sendJson(response, 400, { error: "Calendar API JSON body must be an object" });
+        return true;
+      }
+      body = parsed;
+    }
     const result = await mod.default({
-      query: queryToRecord(requestUrl.searchParams)
+      query: { ...queryToRecord(requestUrl.searchParams), ...body },
+      request
     });
     sendJson(response, 200, result);
     return true;
@@ -414,6 +453,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
                 height: viewport.height,
                 optimize: true,
                 payload,
+                timezone: config.timezone,
                 url: renderUrl.href,
                 width: viewport.width
               });
@@ -468,6 +508,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
           height,
           optimize: body?.optimize !== false,
           payload,
+          timezone: config.timezone,
           url: renderUrl.href,
           width
         });
@@ -524,7 +565,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
       const decodedPath = decodeURIComponent(requestUrl.pathname);
       const pathName = decodedPath === "/" ? `/${config.renderPage}` : decodedPath;
 
-      if (await tryServeApi(response, requestUrl, integrationRoot)) {
+      if (await tryServeApi(request, response, requestUrl, integrationRoot)) {
         return;
       }
 
@@ -536,7 +577,7 @@ export async function startDevServer(options: DevServerOptions): Promise<DevServ
 
       const assetName = pathName.replace(/^\/assets\//, "/");
 
-      if (["/paperless.css", "/paperless.js", "/paperless.iife.js"].includes(assetName)) {
+      if (["/paperless.css", "/settings.css", "/paperless.js", "/paperless.iife.js"].includes(assetName)) {
         if (await tryServeFile(response, join(distRoot, assetName), distRoot)) {
           return;
         }

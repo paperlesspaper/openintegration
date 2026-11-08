@@ -18,6 +18,7 @@ import {
   markLoading,
   markReady,
   mergeSettings,
+  renderOfTheDayLayout,
   resolveLanguage,
   stripSoftHyphens,
   validateConfig,
@@ -29,6 +30,34 @@ function resetDom(url = "https://example.test/render.html"): void {
   window.history.replaceState({}, "", url);
 }
 
+function runAnimationFramesImmediately(): () => void {
+  const originalRequestAnimationFrame = window.requestAnimationFrame;
+  const originalCancelAnimationFrame = window.cancelAnimationFrame;
+
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    }
+  });
+  Object.defineProperty(window, "cancelAnimationFrame", {
+    configurable: true,
+    value: () => undefined
+  });
+
+  return () => {
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: originalRequestAnimationFrame
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      value: originalCancelAnimationFrame
+    });
+  };
+}
+
 describe("ready markers", () => {
   it("markLoading creates a loading marker", () => {
     resetDom();
@@ -36,6 +65,7 @@ describe("ready markers", () => {
     markLoading();
 
     expect(document.querySelector("#website-has-loading-element")).toBeTruthy();
+    expect(document.documentElement.dataset.paperlessRenderStatus).toBe("loading");
   });
 
   it("markReady removes loading and creates loaded marker", () => {
@@ -46,10 +76,23 @@ describe("ready markers", () => {
 
     expect(document.querySelector("#website-has-loading-element")).toBeNull();
     expect(document.querySelector("#website-has-loaded")?.textContent).toBe("ready");
+    expect(document.documentElement.dataset.paperlessRenderStatus).toBe("ready");
+  });
+
+  it("markLoading clears a stale ready marker", () => {
+    resetDom();
+    markReady();
+
+    markLoading();
+
+    expect(document.querySelector("#website-has-loaded")).toBeNull();
+    expect(document.querySelector("#website-has-loading-element")).toBeTruthy();
   });
 
   it("markError creates a loaded marker and logs", () => {
     resetDom();
+    document.body.append(document.createElement("script"));
+    document.querySelector("script")!.textContent = "console.log('integration code')";
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     markError(new Error("boom"));
@@ -57,6 +100,8 @@ describe("ready markers", () => {
     expect(spy).toHaveBeenCalled();
     expect(document.querySelector("#website-has-loaded")).toBeTruthy();
     expect(document.querySelector(".pp-error")).toBeTruthy();
+    expect(document.documentElement.dataset.paperlessRenderStatus).toBe("error");
+    expect(document.documentElement.dataset.paperlessRenderError).toBe("boom");
   });
 });
 
@@ -95,6 +140,84 @@ describe("payload and settings", () => {
         }
       }
     });
+  });
+
+  it("waitForPayload preserves legacy array payloads under data", async () => {
+    resetDom();
+    const promise = waitForPayload({ timeoutMs: 50 });
+
+    window.postMessage(
+      {
+        cmd: "message",
+        data: [{ summary: "Legacy event" }]
+      },
+      "*"
+    );
+
+    await expect(promise).resolves.toEqual({
+      data: [{ summary: "Legacy event" }]
+    });
+  });
+
+  it("waitForPayload can receive later INIT updates", async () => {
+    resetDom();
+    const updates: unknown[] = [];
+    const promise = waitForPayload({
+      timeoutMs: 50,
+      onUpdate: (payload) => {
+        updates.push(payload);
+      }
+    });
+
+    window.postMessage(
+      {
+        type: "INIT",
+        cmd: "message",
+        data: {
+          meta: {
+            pluginSettings: {
+              kind: "first"
+            }
+          }
+        }
+      },
+      "*"
+    );
+
+    await expect(promise).resolves.toEqual({
+      meta: {
+        pluginSettings: {
+          kind: "first"
+        }
+      }
+    });
+
+    window.postMessage(
+      {
+        type: "INIT",
+        cmd: "message",
+        data: {
+          meta: {
+            pluginSettings: {
+              kind: "second"
+            }
+          }
+        }
+      },
+      "*"
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(updates).toEqual([
+      {
+        meta: {
+          pluginSettings: {
+            kind: "second"
+          }
+        }
+      }
+    ]);
   });
 
   it("waitForPayload supports the timeout alias", async () => {
@@ -326,6 +449,43 @@ describe("layout helpers", () => {
     expect(fitToScreen(element)).toBe(1);
   });
 
+  it("fitToScreen updates when the screen resizes", () => {
+    resetDom();
+    const restoreAnimationFrame = runAnimationFramesImmediately();
+    const originalWidth = window.innerWidth;
+    const originalHeight = window.innerHeight;
+    const element = document.createElement("main");
+    document.body.append(element);
+    vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+      bottom: 1000,
+      height: 1000,
+      left: 0,
+      right: 1000,
+      toJSON: () => ({}),
+      top: 0,
+      width: 1000,
+      x: 0,
+      y: 0
+    } as DOMRect);
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 });
+
+    try {
+      expect(fitToScreen(element)).toBe(0.5);
+      expect(element.style.transform).toBe("scale(0.5)");
+
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 250 });
+      window.dispatchEvent(new Event("resize"));
+
+      expect(element.style.transform).toBe("scale(0.25)");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalHeight });
+      restoreAnimationFrame();
+    }
+  });
+
   it("detectOverflow returns a report", () => {
     resetDom();
 
@@ -342,6 +502,75 @@ describe("layout helpers", () => {
     fitImage(image, "cover");
 
     expect(image.style.objectFit).toBe("cover");
+  });
+
+  it("fitImage reapplies its mode when the screen resizes", () => {
+    resetDom();
+    const restoreAnimationFrame = runAnimationFramesImmediately();
+    const image = document.createElement("img");
+    document.body.append(image);
+
+    try {
+      fitImage(image, "cover");
+      image.style.objectFit = "contain";
+      window.dispatchEvent(new Event("resize"));
+
+      expect(image.style.objectFit).toBe("cover");
+    } finally {
+      restoreAnimationFrame();
+    }
+  });
+});
+
+describe("of-the-day helpers", () => {
+  it("renders the shared of-the-day layout", () => {
+    resetDom();
+    document.body.innerHTML = '<main id="app"></main>';
+
+    const layout = renderOfTheDayLayout({
+      target: "#app",
+      layout: "facts-left-landscape",
+      textSize: "big",
+      kicker: "Tree of the day",
+      title: "Coast Redwood",
+      subtitle: "Sequoia sempervirens",
+      signature: "Tallest living tree species on Earth.",
+      image: {
+        src: "./assets/tree.png",
+        alt: "Coast Redwood",
+        blendMode: "multiply"
+      },
+      meta: [{ key: "date", value: "08 Jul" }],
+      facts: [{ label: "Height", value: "115 m" }]
+    });
+
+    expect(layout.target.classList.contains("pp-otd--facts-left-landscape")).toBe(true);
+    expect(layout.target.classList.contains("pp-otd--text-big")).toBe(true);
+    expect(layout.title?.textContent).toBe("Coast Redwood");
+    expect(layout.signature?.previousElementSibling?.className).toBe("pp-otd-title-area");
+    expect(layout.factGrid.dataset.count).toBe("1");
+    expect(layout.image.style.mixBlendMode).toBe("multiply");
+  });
+
+  it("does not restore fallback facts when every fact is hidden", () => {
+    resetDom();
+    document.body.innerHTML = '<main id="app"></main>';
+
+    const layout = renderOfTheDayLayout({
+      target: "#app",
+      showHeader: false,
+      title: "Hidden Facts",
+      image: { src: "./assets/item.png" },
+      facts: [
+        { label: "Range", value: "Europe", visible: false },
+        { label: "Age", value: "400 years", visible: false }
+      ]
+    });
+
+    expect(layout.target.classList.contains("pp-otd--hide-header")).toBe(true);
+    expect(layout.target.classList.contains("pp-otd--no-facts")).toBe(true);
+    expect(layout.facts).toHaveLength(0);
+    expect(layout.factGrid.dataset.count).toBe("0");
   });
 });
 
@@ -399,6 +628,42 @@ describe("html and config helpers", () => {
     ).toEqual({
       valid: false,
       errors: ["language must be an array of non-empty language codes"],
+      warnings: []
+    });
+  });
+
+  it("validateConfig accepts a valid IANA timezone", () => {
+    expect(
+      validateConfig({
+        description: "Daily XKCD",
+        formSchema: {},
+        name: "xkcd",
+        nativeSettings: {},
+        renderPage: "render.html",
+        timezone: "Europe/Berlin",
+        version: "1.0.0"
+      })
+    ).toEqual({
+      valid: true,
+      errors: [],
+      warnings: []
+    });
+  });
+
+  it("validateConfig rejects an invalid timezone", () => {
+    expect(
+      validateConfig({
+        description: "Daily XKCD",
+        formSchema: {},
+        name: "xkcd",
+        nativeSettings: {},
+        renderPage: "render.html",
+        timezone: "Berlin",
+        version: "1.0.0"
+      })
+    ).toEqual({
+      valid: false,
+      errors: ["timezone must be a valid IANA timezone"],
       warnings: []
     });
   });

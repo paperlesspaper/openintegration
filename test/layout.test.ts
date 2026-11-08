@@ -6,6 +6,7 @@ import {
 } from "../src/layout";
 import { markError, markReady } from "../src/ready";
 import { waitForPayload } from "../src/runtime";
+import { acceptsEmbeddedInit } from "../src/embedded";
 const originalParent = window.parent;
 afterEach(() => {
   vi.restoreAllMocks();
@@ -87,6 +88,14 @@ describe("embedded lifecycle", () => {
       'paperless-slot:{"renderId":"r1","regionId":"calendar","parentOrigin":"https://host.test"}';
     return parent;
   }
+  it("rejects messages when a declared embedded context is malformed", () => {
+    const parent = embed();
+    window.name = "paperless-slot:not-json";
+    expect(acceptsEmbeddedInit(new MessageEvent("message", {
+      source: parent as any, origin: "https://host.test",
+      data: { type: "INIT", data: { forged: true } },
+    }))).toBe(false);
+  });
   it("reports errors without an intermediate successful ready message", () => {
     const parent = embed();
     vi.spyOn(console, "error").mockImplementation(() => {});

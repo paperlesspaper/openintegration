@@ -61,7 +61,7 @@ await build({
   platform: "browser",
   sourcemap: false,
   target: "es2020",
-  footer: { js: "Object.assign(globalThis.PaperlessOpenIntegration ||= {}, PaperlessLayoutIntegration);" }
+  footer: { js: "globalThis.PaperlessOpenIntegration = { ...globalThis.PaperlessOpenIntegration, ...PaperlessLayoutIntegration };" }
 });
 
 await cp(resolve(root, "src/styles/paperless.css"), resolve(dist, "paperless.css"));

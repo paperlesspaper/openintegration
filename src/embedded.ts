@@ -49,7 +49,7 @@ export function announceEmbeddedListener(): void {
 }
 export function acceptsEmbeddedInit(event: MessageEvent): boolean {
   const context = embeddedContext();
-  if (!context) return true;
+  if (!context) return !(window.parent !== window && window.name.startsWith("paperless-slot:"));
   const message = event.data as JsonRecord | undefined;
   return (
     event.source === window.parent &&

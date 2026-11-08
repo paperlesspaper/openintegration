@@ -149,6 +149,17 @@ describe.skipIf(!enabled)("layout Chromium rendering", () => {
       );
       const image = await loadImage(result.buffer);
       expect([image.width, image.height]).toEqual([width, height]);
+      // Sparse calendar accents must survive auto-processing on the 13-inch panel.
+      if (width === 1600 && height === 1200) {
+        const check = createCanvas(width, height);
+        check.getContext("2d").drawImage(image, 0, 0);
+        const pixels = check.getContext("2d").getImageData(1085, 45, 185, 40).data;
+        let blue = 0;
+        for (let i = 0; i < pixels.length; i += 4)
+          if (pixels[i] === 0 && pixels[i + 1] === 0 && pixels[i + 2] === 255) blue++;
+        expect(blue).toBeGreaterThan(500);
+      }
+
       if (process.env.LAYOUT_REVIEW_DIR) {
         await mkdir(process.env.LAYOUT_REVIEW_DIR, { recursive: true });
         await writeFile(

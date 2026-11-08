@@ -1,5 +1,8 @@
+import { postEmbeddedStatus } from "./embedded";
 const loadingMarkerId = "website-has-loading-element";
 const loadedMarkerId = "website-has-loaded";
+const renderStatusDataKey = "paperlessRenderStatus";
+const renderErrorDataKey = "paperlessRenderError";
 
 function getDocument(): Document | undefined {
   return globalThis.document;
@@ -43,6 +46,10 @@ function hasVisiblePageContent(): boolean {
       return false;
     }
 
+    if (["SCRIPT", "STYLE", "NOSCRIPT"].includes(element.tagName)) {
+      return false;
+    }
+
     return !element.hidden && element.textContent?.trim();
   });
 
@@ -50,7 +57,14 @@ function hasVisiblePageContent(): boolean {
 }
 
 export function markLoading(): void {
+  const doc = getDocument();
+  doc?.getElementById(loadedMarkerId)?.remove();
+  if (doc) {
+    doc.documentElement.dataset[renderStatusDataKey] = "loading";
+    delete doc.documentElement.dataset[renderErrorDataKey];
+  }
   appendHiddenMarker(loadingMarkerId);
+  postEmbeddedStatus("loading");
 }
 
 export function markReady(): void {
@@ -61,7 +75,10 @@ export function markReady(): void {
   }
 
   doc.getElementById(loadingMarkerId)?.remove();
+  doc.documentElement.dataset[renderStatusDataKey] = "ready";
+  delete doc.documentElement.dataset[renderErrorDataKey];
   appendHiddenMarker(loadedMarkerId, "ready");
+  postEmbeddedStatus("ready");
 }
 
 export function markError(error?: unknown): void {
@@ -79,5 +96,12 @@ export function markError(error?: unknown): void {
     doc.body.append(block);
   }
 
-  markReady();
+  if (doc) {
+    doc.getElementById(loadingMarkerId)?.remove();
+    appendHiddenMarker(loadedMarkerId, "error");
+    doc.documentElement.dataset[renderStatusDataKey] = "error";
+    doc.documentElement.dataset[renderErrorDataKey] =
+      error instanceof Error ? error.message : String(error || "unknown error");
+    postEmbeddedStatus("error", doc.documentElement.dataset[renderErrorDataKey]);
+  }
 }

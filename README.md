@@ -358,3 +358,59 @@ The upstream `mixins.scss` is just direct orientation media queries. In plain CS
   /* equivalent to @include vertical */
 }
 ```
+
+## Composed layouts
+
+`bootLayoutIntegration(target)` renders a host-resolved `payload.layout`. The first-party
+Layout editor stores two to four paper references; only the authenticated host resolves
+them to image URLs or integration render URLs and per-content INIT payloads. Never pass
+organization-wide credentials to children or persist signed image URLs in settings.
+
+A layout contains `renderId`, `layout` (`columns`, `rows`, `grid`, `custom`), `regions`,
+`ratio`, `gap`, `color`, and optionally `html`/`css`. Each region has a unique `id`, `type`
+(`image` or `integration`), `url`, optional `payload`, image `fit`/`focalX`/`focalY`, and
+`processing` (`inherit`, `photo`, `readable`, `quantization`). Custom HTML uses one
+`<paperless-slot name="region-id"></paperless-slot>` per region. Its presentation-only
+markup and resource-free CSS are validated and isolated in a shadow root. Slots must be
+rectangular, opaque, untransformed, non-overlapping and within the fixed viewport.
+
+Embedded child documents use a `paperless-slot:` window name containing `renderId`,
+`regionId` and `parentOrigin`. `waitForPayload()` registers its receiver and sends
+`PAPERLESS_RENDER_HELLO`; it disables the standalone fallback and accepts only the matching
+INIT from the named parent origin/window. The parent sends INIT once per fresh child
+iframe. `markLoading`, `markReady`, and `markError` report `PAPERLESS_RENDER_STATUS` with
+the same identifiers. Error is a distinct terminal result, never an intermediate READY.
+`waitForPayload({ source: window.parent })` also restricts top-level layout initialization.
+
+The layout waits for image decoding, every child, fonts and layout settling. Each preview
+update aborts the previous run and creates new iframes, so old asynchronous work cannot
+complete a newer run. A failed/missing child fails the whole frame after at most 12 seconds;
+applications should keep the previous display image. Integrations without a readiness
+contract or which block framing cannot be embedded. Live previews need the updated runtime;
+headless renderers additionally bridge the older DOM marker contract.
+
+On success the layout writes `meta[name="paperless:regions"]` with integer pixel bounds
+and processing settings. Renderers validate bounds/count/overlap, process the background
+without the content areas, independently process each raw crop using one target palette,
+and compose device-color pixels without further resampling or dithering. Panel rotation
+happens once after composition in the host API. `enabled:false` is accepted only for areas
+already containing opaque device-palette pixels. CLI/preview rendering uses the same region
+contract. `renderRegions.ts` and `renderEmbedded.ts` have matching host API counterparts;
+keep their protocol and validation behavior aligned.
+
+Browser regression checks (requires Chrome) and optional review images:
+
+```sh
+LAYOUT_BROWSER_TESTS=1 LAYOUT_REVIEW_DIR=/tmp/layout-review npm test -- --run test/layout-render.test.ts
+```
+
+These use local synthetic data only and cover both frame sizes/orientations, a custom
+HTML layout, cross-origin loading, child errors and overlapping regions.
+
+### Additive host bundle
+
+`dist/layout-addon.iife.js` extends an existing `PaperlessOpenIntegration` global with
+layout rendering and the embedded lifecycle, preserving all other exports. It also
+bridges legacy DOM readiness markers inside named layout iframes. Load it immediately
+after the shared runtime, before an integration registers its payload listeners.
+This allows hosts to adopt layouts without replacing their existing runtime snapshot.

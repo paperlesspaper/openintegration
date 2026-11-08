@@ -44,3 +44,6 @@ export type {
   ValidationResult,
   WaitForPayloadOptions
 } from "./types";
+
+export { bootLayoutIntegration, renderLayout, validateLayoutRects, sanitizeLayoutHtml } from "./layout";
+export type { LayoutPayload, LayoutRegion } from "./layout";

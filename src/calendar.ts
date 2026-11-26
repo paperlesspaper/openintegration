@@ -1447,7 +1447,26 @@ export function renderCalendarLayout(
 
 // Preserve readable short appointments without allowing their minimum visual height to
 // cover a neighboring appointment. Recompute lanes using the actual pixel intervals.
-function fitWeekGrid(target: HTMLElement): void {
+function fitWeekGrid(target: HTMLElement, requestedScale: number): void {
+  // Scale large week grids to the space between dates and hour ticks on this display.
+  const requested = Number(target.dataset.calendarFontScale) || 1;
+  if (requested > 1.5) {
+    let scale = requestedScale;
+    while (true) {
+      target.style.setProperty("--pp-cal-font-scale", String(scale));
+      const crowded = Array.from(target.querySelectorAll<HTMLElement>(".pp-cal-week")).some(week => {
+        if (!week.clientWidth) return false;
+        const headings = week.querySelectorAll<HTMLElement>(".pp-cal-week-heading");
+        if (Array.from(headings).some(heading => heading.scrollWidth > heading.clientWidth + 1)) return true;
+        const hours = week.querySelectorAll<HTMLElement>(".pp-cal-hour");
+        if (hours.length < 2) return false;
+        const axisHeight = hours[0].parentElement!.clientHeight;
+        return hours[0].offsetHeight * (hours.length - 1) * 1.5 > axisHeight;
+      });
+      if (!crowded || scale <= 1) break;
+      scale = Math.max(1, scale - .125);
+    }
+  }
   for (const grid of target.querySelectorAll<HTMLElement>(".pp-cal-week-grid")) {
     if (grid.clientHeight <= 0) continue;
     const fontScale = parseFloat(target.style.getPropertyValue("--pp-cal-font-scale")) || 1;
@@ -1478,6 +1497,16 @@ function fitWeekGrid(target: HTMLElement): void {
         const card = node.querySelector<HTMLElement>(".pp-cal-event")!;
         const content = node.querySelector<HTMLElement>(".pp-cal-event-content")!;
         const time = node.querySelector<HTMLElement>(".pp-cal-event-time")!;
+        if (requested > 1.5) {
+          // Long shifts have room for larger type even when the axes must stay compact.
+          const title = content.querySelector<HTMLElement>(".pp-cal-event-title")!;
+          card.style.fontSize = "";
+          title.style.fontSize = "";
+          const base = parseFloat(getComputedStyle(card).fontSize);
+          const baseTitle = parseFloat(getComputedStyle(title).fontSize);
+          fitText(card, { min: base, max: base * requestedScale / fontScale, step: 1 });
+          fitText(title, { min: baseTitle, max: parseFloat(getComputedStyle(title).fontSize), step: 1 });
+        }
         const style = getComputedStyle(card);
         const requiredHeight = content.scrollHeight + time.offsetHeight
           + parseFloat(style.paddingTop || "0") + parseFloat(style.paddingBottom || "0")
@@ -1569,7 +1598,8 @@ export function fitCalendarLayout(
       : layoutOrTarget.target;
   const density = target.dataset.informationDensity || "comfortable";
   const factor = density === "compact" ? .88 : density === "spacious" ? 1.12 : 1;
-  target.style.setProperty("--pp-cal-font-scale", String((Number(target.dataset.calendarFontScale) || 1) * factor));
+  const requestedScale = (Number(target.dataset.calendarFontScale) || 1) * factor;
+  target.style.setProperty("--pp-cal-font-scale", String(requestedScale));
   const body = target.querySelector<HTMLElement>(".pp-cal-content");
   // Shared fitting keeps long personal headings inside their allotted header area.
   for (const node of target.querySelectorAll<HTMLElement>(".pp-cal-title, .pp-cal-subtitle")) {
@@ -1616,10 +1646,10 @@ export function fitCalendarLayout(
     return;
   }
   if (view === "pp-cal--view-week" || view === "pp-cal--view-rolling-week") {
-    fitWeekGrid(target);
+    fitWeekGrid(target, requestedScale);
     const grids = target.querySelectorAll<HTMLElement>(".pp-cal-week-grid");
     if (grids.length && typeof ResizeObserver !== "undefined") {
-      const observer = new ResizeObserver(() => fitWeekGrid(target));
+      const observer = new ResizeObserver(() => fitWeekGrid(target, requestedScale));
       grids.forEach(grid => observer.observe(grid));
       weekResizeObservers.set(target, observer);
     }

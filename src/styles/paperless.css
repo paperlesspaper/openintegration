@@ -773,9 +773,7 @@ textarea {
   --pp-cal-gap: clamp(6px, 1vh, 12px);
   --pp-cal-on-accent: var(--pp-white);
 }
-.dark :is(.pp-cal--view-week, .pp-cal--view-rolling-week),
-.green-light :is(.pp-cal--view-week, .pp-cal--view-rolling-week),
-.green-dark :is(.pp-cal--view-week, .pp-cal--view-rolling-week) {
+.dark :is(.pp-cal--view-week, .pp-cal--view-rolling-week) {
   --pp-cal-on-accent: var(--pp-black);
 }
 :is(.pp-cal--view-week, .pp-cal--view-rolling-week) .pp-cal-header {
@@ -1079,7 +1077,7 @@ textarea {
 }
 .pp-cal-week-all-day .has-source-color .pp-cal-event-icon { color: inherit; }
 
-.pp-cal-week .pp-cal-event.has-source-color:is(.pp-cal-event--color-blue, .pp-cal-event--color-yellow, .pp-cal-event--color-red) {
+.pp-cal-week .pp-cal-event.has-source-color:is(.pp-cal-event--color-blue, .pp-cal-event--color-yellow, .pp-cal-event--color-red, .pp-cal-event--color-green) {
   border: 0;
 }
 

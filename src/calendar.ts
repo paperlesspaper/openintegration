@@ -290,7 +290,7 @@ export function normalizeCalendarSettings(
 
   return {
     view,
-    fontSize: clampNumber(source.fontSize, base.fontSize, 75, 150),
+    fontSize: clampNumber(source.fontSize, base.fontSize, 75, 400),
     noPadding: parseBoolean(source.noPadding, base.noPadding),
     fullWeekdayNames: parseBoolean(source.fullWeekdayNames, base.fullWeekdayNames),
     locale: validLocale(localeValue, base.locale),
@@ -759,7 +759,7 @@ function calendarPaletteColor(value: unknown): string {
 function calendarEventColors(event: CalendarEvent): { className: string; style: string } {
   const color = calendarPaletteColor(event.color) || calendarPaletteColor(event.calendarColor);
   if (!color) return { className: "", style: "" };
-  const foreground = ["white", "yellow", "green"].includes(color) ? "black" : "white";
+  const foreground = ["white", "yellow"].includes(color) ? "black" : "white";
   return {
     className: `has-source-color pp-cal-event--color-${color}`,
     style: ` style="--pp-cal-event-bg:var(--pp-${color});--pp-cal-event-fg:var(--pp-${foreground})"`

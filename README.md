@@ -453,9 +453,9 @@ grouping, sorting, empty states, all shared views, optional locations/icons/imag
 and fitting. `noPadding: true` removes the outer calendar spacing in every view
 and the outer week-grid borders, while preserving internal separators.
 `fullWeekdayNames: true` spells out localized weekdays in day, three-day, and week headers.
-Both options default to `false`. `fontSize` adjusts typography from 75 to 150 percent
+Both options default to `false`. `fontSize` adjusts typography from 75 to 400 percent
 (default: 100). Dense non-week views may reduce text to fit the available space. The week view uses dashed row and column separators,
-including the all-day row; blue, yellow, and red event fills have no outline.
+including the all-day row; blue, yellow, red, and green event fills have no outline. Green fills use white text.
 
 ```js
 const settings = normalizeCalendarSettings({

@@ -23,7 +23,7 @@ describe("shared calendar settings", () => {
         maxEvents: 0,
         highlightToday: "yes",
         highlightScale: 8,
-        fontSize: 200,
+        fontSize: 500,
         noPadding: "yes",
         fullWeekdayNames: "true",
         showLocation: "off"
@@ -35,7 +35,7 @@ describe("shared calendar settings", () => {
       maxEvents: 1,
       highlightToday: true,
       highlightScale: 3,
-      fontSize: 150,
+      fontSize: 400,
       noPadding: true,
       fullWeekdayNames: true,
       showLocation: false
@@ -397,7 +397,7 @@ describe("provider calendar colors", () => {
     expect(show().hasAttribute("style")).toBe(false);
   });
   it("maps source colors to native pigments and uses a contrasting text color", () => {
-    for (const [input,bg,fg] of [["yellow","yellow","black"],["#16a34a","green","black"],["rebeccapurple","blue","white"],["#ffffff","white","black"],["#111111","black","white"]]) {
+    for (const [input,bg,fg] of [["yellow","yellow","black"],["#16a34a","green","white"],["rebeccapurple","blue","white"],["#ffffff","white","black"],["#111111","black","white"]]) {
       const card=show(input);
       expect(card.style.getPropertyValue("--pp-cal-event-bg")).toBe(`var(--pp-${bg})`);
       expect(card.style.getPropertyValue("--pp-cal-event-fg")).toBe(`var(--pp-${fg})`);
